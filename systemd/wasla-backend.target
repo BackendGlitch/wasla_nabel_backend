@@ -1,0 +1,8 @@
+[Unit]
+Description=Wasla Backend (all services)
+Wants=wasla-migrate.service wasla-auth.service wasla-queue.service wasla-booking.service wasla-websocket.service wasla-printer.service wasla-statistics.service wasla-public.service
+After=network.target wasla-migrate.service
+
+[Install]
+WantedBy=multi-user.target
+

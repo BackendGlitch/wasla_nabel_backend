@@ -1,0 +1,41 @@
+name: Postman Collection Sync
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'docs/Wasla_Backend.postman_collection.json'
+      - 'scripts/push-postman-collection.js'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/postman-sync.yml'
+  workflow_dispatch:
+
+jobs:
+  sync-postman:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Push Postman collection
+        if: ${{ secrets.POSTMAN_API_KEY != '' && secrets.POSTMAN_COLLECTION_UID != '' }}
+        run: npm run postman:push
+        env:
+          POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
+          POSTMAN_COLLECTION_UID: ${{ secrets.POSTMAN_COLLECTION_UID }}
+
+      - name: Missing secrets warning
+        if: ${{ secrets.POSTMAN_API_KEY == '' || secrets.POSTMAN_COLLECTION_UID == '' }}
+        run: echo "::warning::Skipping Postman sync because POSTMAN_API_KEY or POSTMAN_COLLECTION_UID is missing."

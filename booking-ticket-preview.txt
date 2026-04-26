@@ -1,0 +1,18 @@
+================================
+  STE DHRAIFF SERVICES TRANSPORT
+================================
+     BILLET DE RÉSERVATION
+--------------------------------
+Vehicule: 123 TU 4567
+Destination: SFAX
+Siège: 3
+Prix de base: 13.50 TND
+Frais de service: 0.45 TND
+Total: 13.95 TND
+Date: 20/02/2026 14:30
+Agent: Ali Ben Salah
+--------------------------------
+Merci de nous avoir choisis!
+Agent: Ali Ben Salah
+
+

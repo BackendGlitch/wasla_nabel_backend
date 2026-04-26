@@ -1,0 +1,42 @@
+tunnel: wasla-tunnel
+credentials-file: /home/ste/.cloudflared/ed084530-77ef-43e2-96b7-95d825e11e37.json
+
+ingress:
+  # Auth Service
+  - hostname: auth.wasla-backend.tunnel.cloudflare.com
+    service: http://localhost:8001
+    originRequest:
+      httpHostHeader: auth.wasla-backend.tunnel.cloudflare.com
+
+  # Queue Service  
+  - hostname: queue.wasla-backend.tunnel.cloudflare.com
+    service: http://localhost:8002
+    originRequest:
+      httpHostHeader: queue.wasla-backend.tunnel.cloudflare.com
+
+  # Booking Service
+  - hostname: booking.wasla-backend.tunnel.cloudflare.com
+    service: http://localhost:8003
+    originRequest:
+      httpHostHeader: booking.wasla-backend.tunnel.cloudflare.com
+
+  # WebSocket Hub
+  - hostname: ws.wasla-backend.tunnel.cloudflare.com
+    service: http://localhost:8004
+    originRequest:
+      httpHostHeader: ws.wasla-backend.tunnel.cloudflare.com
+
+  # Printer Service
+  - hostname: printer.wasla-backend.tunnel.cloudflare.com
+    service: http://localhost:8005
+    originRequest:
+      httpHostHeader: printer.wasla-backend.tunnel.cloudflare.com
+
+  # Statistics Service
+  - hostname: stats.wasla-backend.tunnel.cloudflare.com
+    service: http://localhost:8006
+    originRequest:
+      httpHostHeader: stats.wasla-backend.tunnel.cloudflare.com
+
+  # Catch-all rule
+  - service: http_status:404

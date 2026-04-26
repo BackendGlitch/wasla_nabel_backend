@@ -1,0 +1,25 @@
+[Unit]
+Description=Wasla WebSocket Hub
+After=network.target wasla-migrate.service
+Wants=wasla-migrate.service
+
+[Service]
+WorkingDirectory=/home/ste/wasla_backend
+EnvironmentFile=/home/ste/wasla_backend/configs/environment.env
+ExecStart=/home/ste/wasla_backend/bin/websocket-hub
+Restart=on-failure
+RestartSec=2
+User=ste
+Group=ste
+LimitNOFILE=65536
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=wasla-websocket
+
+[Install]
+WantedBy=wasla-backend.target
+

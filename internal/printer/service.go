@@ -1,0 +1,889 @@
+package printer
+
+import (
+	"bytes"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"math"
+	"regexp"
+	"strings"
+	"time"
+
+	"station-backend/internal/pricing"
+)
+
+// ClientPrinterPrefix marks print_jobs.printer_id rows that are delivered to
+// the client (POS device) instead of being TCP-dialed by the worker. Format:
+//
+//	"client:<machine-id>"   e.g. "client:pos-7e1c…" or "client:default"
+//
+// The TCP worker MUST refuse to handle any job whose printer_id starts with
+// this prefix as a defense-in-depth check (rendered jobs never enter the
+// pending queue, but we still guard the code path).
+const ClientPrinterPrefix = "client:"
+
+// Service handles printer business logic
+type Service struct {
+	repo      *Repository
+	auditRepo *AuditRepository
+	jobsRepo  *PrintJobsRepository
+}
+
+// NewService creates a new printer service
+func NewService(repo *Repository, auditRepo *AuditRepository, jobsRepo *PrintJobsRepository) *Service {
+	return &Service{
+		repo:      repo,
+		auditRepo: auditRepo,
+		jobsRepo:  jobsRepo,
+	}
+}
+
+// EnqueueTicket creates a durable FIFO print job and returns its job ID.
+// If ticketData.IdempotencyKey is set, retries will return the same job ID (no duplicate tickets).
+func (s *Service) EnqueueTicket(ctx context.Context, ticketData *TicketData, jobType PrintJobType) (string, error) {
+	if s == nil || s.jobsRepo == nil {
+		return "", fmt.Errorf("print jobs repository is not configured")
+	}
+
+	printerIDForJob := strings.TrimSpace(ticketData.PrinterID)
+	if printerIDForJob == "" {
+		if ticketData.PrinterConfig != nil && ticketData.PrinterConfig.IP != "" && ticketData.PrinterConfig.Port != 0 {
+			printerIDForJob = fmt.Sprintf("%s:%d", ticketData.PrinterConfig.IP, ticketData.PrinterConfig.Port)
+		} else {
+			printerIDForJob = "default"
+		}
+	}
+
+	var bookingIDPtr *string
+	if strings.TrimSpace(ticketData.BookingID) != "" {
+		bookingIDPtr = &ticketData.BookingID
+	}
+
+	return s.jobsRepo.CreateOrGetJob(ctx, printerIDForJob, ticketData.IdempotencyKey, bookingIDPtr, jobType, ticketData)
+}
+
+// StartPrintWorker runs a single FIFO worker that processes pending print_jobs in order.
+func (s *Service) StartPrintWorker(ctx context.Context) {
+	if s == nil || s.jobsRepo == nil {
+		return
+	}
+	go func() {
+		ticker := time.NewTicker(200 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				job, err := s.jobsRepo.ClaimNextPending(ctx)
+				if err != nil {
+					continue
+				}
+				_ = s.processClaimedJob(ctx, job)
+			}
+		}
+	}()
+}
+
+func (s *Service) processClaimedJob(ctx context.Context, job *ClaimedJob) error {
+	if job == nil {
+		return nil
+	}
+
+	// Defense in depth: client_local jobs (printer_id "client:<id>") are delivered
+	// over HTTP to the POS device's local agent; the TCP worker must never dial
+	// them. They are normally inserted in 'rendered' status (not 'pending') so
+	// they don't even reach this code path, but if one ever leaks in we mark it
+	// failed instead of attempting a TCP write to a non-existent printer.
+	if strings.HasPrefix(job.PrinterID, ClientPrinterPrefix) {
+		_ = s.jobsRepo.MarkFailed(ctx, job.ID, "client_local job mistakenly queued for backend_tcp worker; ignoring")
+		return nil
+	}
+
+	var ticketData TicketData
+	if err := json.Unmarshal(job.Payload, &ticketData); err != nil {
+		_ = s.jobsRepo.MarkFailed(ctx, job.ID, "invalid payload_json")
+		return err
+	}
+
+	// Use printer config from request, or fallback to default
+	var config *PrinterConfig
+	if ticketData.PrinterConfig != nil {
+		config = &PrinterConfig{
+			IP:      ticketData.PrinterConfig.IP,
+			Port:    ticketData.PrinterConfig.Port,
+			Width:   32,
+			Timeout: 5000,
+			Model:   "ESC/POS",
+			Enabled: true,
+		}
+	} else {
+		defaultConfig, err := s.repo.GetPrinterConfig("default")
+		if err != nil {
+			_ = s.jobsRepo.MarkFailed(ctx, job.ID, fmt.Sprintf("default printer config not found: %v", err))
+			return err
+		}
+		config = defaultConfig
+	}
+
+	content := s.generateContentForJobType(&ticketData, job.JobType)
+	escPosData := s.convertToESCPOS(content, config)
+
+	if err := s.repo.SendPrintData(config, escPosData); err != nil {
+		_ = s.jobsRepo.MarkFailed(ctx, job.ID, err.Error())
+		return err
+	}
+
+	// ESC/POS over raw TCP is "fire-and-forget": Write() success doesn't guarantee the printer
+	// has finished rendering/cutting. Under bursts we observed missing physical prints, while the
+	// app already marked jobs as printed. Give the device a short moment to drain its buffer
+	// before we move on / mark printed.
+	time.Sleep(350 * time.Millisecond)
+
+	// Best-effort audit log
+	if s.auditRepo != nil {
+		printedAt := time.Now()
+		var bookingID *string
+		if strings.TrimSpace(ticketData.BookingID) != "" {
+			bookingID = &ticketData.BookingID
+		}
+		_ = s.auditRepo.LogPrinted(context.Background(), bookingID, job.PrinterID, job.JobType, printedAt)
+	}
+
+	_ = s.jobsRepo.MarkPrinted(ctx, job.ID, time.Now())
+	return nil
+}
+
+// GetPrinterConfig retrieves printer configuration
+func (s *Service) GetPrinterConfig(printerID string) (*PrinterConfig, error) {
+	return s.repo.GetPrinterConfig(printerID)
+}
+
+// UpdatePrinterConfig updates printer configuration
+func (s *Service) UpdatePrinterConfig(config *PrinterConfig) error {
+	return s.repo.SavePrinterConfig(config)
+}
+
+// TestPrinterConnection tests the connection to a printer
+func (s *Service) TestPrinterConnection(printerID string) error {
+	config, err := s.repo.GetPrinterConfig(printerID)
+	if err != nil {
+		return err
+	}
+
+	return s.repo.TestPrinterConnection(config)
+}
+
+// GetPrintQueue retrieves the current print queue
+func (s *Service) GetPrintQueue() ([]QueuedPrintJob, error) {
+	return s.repo.GetPrintQueue()
+}
+
+// GetPrintQueueStatus retrieves the print queue status
+func (s *Service) GetPrintQueueStatus() (*PrintQueueStatus, error) {
+	return s.repo.GetPrintQueueStatus()
+}
+
+// AddPrintJob adds a job to the print queue
+func (s *Service) AddPrintJob(jobType PrintJobType, content string, staffName string, priority int) (*QueuedPrintJob, error) {
+	job := &QueuedPrintJob{
+		ID:         generateJobID(),
+		JobType:    jobType,
+		Content:    content,
+		StaffName:  staffName,
+		Priority:   priority,
+		CreatedAt:  time.Now(),
+		RetryCount: 0,
+	}
+
+	err := s.repo.AddPrintJob(job)
+	if err != nil {
+		return nil, err
+	}
+
+	return job, nil
+}
+
+// PrintTicket prints a ticket directly using printer config from request
+func (s *Service) PrintTicket(ticketData *TicketData, jobType PrintJobType) error {
+	// Use printer config from request, or fallback to default
+	var config *PrinterConfig
+	if ticketData.PrinterConfig != nil {
+		// Convert frontend config to internal config
+		config = &PrinterConfig{
+			IP:      ticketData.PrinterConfig.IP,
+			Port:    ticketData.PrinterConfig.Port,
+			Width:   32,        // Default width
+			Timeout: 5000,      // Default timeout
+			Model:   "ESC/POS", // Default model
+			Enabled: true,      // Assume enabled if config provided
+		}
+	} else {
+		// Fallback to default printer config
+		defaultConfig, err := s.repo.GetPrinterConfig("default")
+		if err != nil {
+			return fmt.Errorf("no printer configuration provided and default config not found: %v", err)
+		}
+		config = defaultConfig
+	}
+
+	content := s.generateContentForJobType(ticketData, jobType)
+	escPosData := s.convertToESCPOS(content, config)
+
+	// Legacy path: immediate printing (non-queued). Prefer EnqueueTicket + worker in production.
+
+	// Send to printer
+	if err := s.repo.SendPrintData(config, escPosData); err != nil {
+		return err
+	}
+
+	// Best-effort audit log (do not fail printing if audit insert fails).
+	if s.auditRepo != nil {
+		printerID := strings.TrimSpace(ticketData.PrinterID)
+		if printerID == "" {
+			if ticketData.PrinterConfig != nil && ticketData.PrinterConfig.IP != "" && ticketData.PrinterConfig.Port != 0 {
+				printerID = fmt.Sprintf("%s:%d", ticketData.PrinterConfig.IP, ticketData.PrinterConfig.Port)
+			} else if config != nil && config.ID != "" {
+				printerID = config.ID
+			} else {
+				printerID = "default"
+			}
+		}
+
+		printedAt := time.Now()
+		var bookingID *string
+		if ticketData.BookingID != "" {
+			bookingID = &ticketData.BookingID
+		}
+		_ = s.auditRepo.LogPrinted(context.Background(), bookingID, printerID, jobType, printedAt)
+	}
+
+	return nil
+}
+
+// PrintBookingTicket prints a booking ticket
+func (s *Service) PrintBookingTicket(ticketData *TicketData) error {
+	return s.PrintTicket(ticketData, PrintJobTypeBookingTicket)
+}
+
+// PrintEntryTicket prints an entry ticket
+func (s *Service) PrintEntryTicket(ticketData *TicketData) error {
+	return s.PrintTicket(ticketData, PrintJobTypeEntryTicket)
+}
+
+// PrintExitTicket prints an exit ticket
+func (s *Service) PrintExitTicket(ticketData *TicketData) error {
+	return s.PrintTicket(ticketData, PrintJobTypeExitTicket)
+}
+
+// PrintDayPassTicket prints a day pass ticket
+func (s *Service) PrintDayPassTicket(ticketData *TicketData) error {
+	return s.PrintTicket(ticketData, PrintJobTypeDayPassTicket)
+}
+
+// PrintExitPassTicket prints an exit pass ticket
+func (s *Service) PrintExitPassTicket(ticketData *TicketData) error {
+	return s.PrintTicket(ticketData, PrintJobTypeExitPassTicket)
+}
+
+// PrintTalon prints a talon
+func (s *Service) PrintTalon(ticketData *TicketData) error {
+	return s.PrintTicket(ticketData, PrintJobTypeTalon)
+}
+
+// generateContentForJobType is the single switch over job types used by both
+// the TCP worker and the client_local render flow, so the layout cannot drift
+// between modes.
+func (s *Service) generateContentForJobType(data *TicketData, jobType PrintJobType) string {
+	switch jobType {
+	case PrintJobTypeBookingTicket:
+		return s.generateBookingTicketContent(data)
+	case PrintJobTypeEntryTicket:
+		return s.generateEntryTicketContent(data)
+	case PrintJobTypeExitTicket:
+		return s.generateExitTicketContent(data)
+	case PrintJobTypeDayPassTicket:
+		return s.generateDayPassTicketContent(data)
+	case PrintJobTypeExitPassTicket:
+		return s.generateExitPassTicketContent(data)
+	case PrintJobTypeTalon:
+		return s.generateTalonContent(data)
+	default:
+		return s.generateStandardTicketContent(data)
+	}
+}
+
+// RenderResult is returned by RenderTicket. ContentBase64 contains the ESC/POS
+// bytes the POS device should write to its USB printer.
+type RenderResult struct {
+	JobID          string         `json:"jobId"`
+	Status         PrintJobStatus `json:"status"`
+	ContentBase64  string         `json:"contentBase64"`
+	AlreadyPrinted bool           `json:"alreadyPrinted"`
+	DeliveryMode   string         `json:"deliveryMode"`
+}
+
+// RenderTicket is the client_local counterpart to EnqueueTicket. It produces the
+// same ESC/POS bytes the TCP worker would have produced (single source of truth)
+// and records a print_jobs row in 'rendered' status with delivery_mode='client_local'.
+//
+// The caller must POST /api/printer/jobs/:id/ack with ok=true after the bytes
+// have been successfully written to the local USB printer (or ok=false on
+// failure). The TCP worker will never touch these rows.
+//
+// machineID is the optional X-Wasla-Machine-Id header set by the staff Electron
+// main; it becomes the suffix of printer_id ("client:<machineID>"). When empty,
+// the printerId from the payload is used; otherwise a "client:default" sentinel.
+func (s *Service) RenderTicket(
+	ctx context.Context,
+	ticketData *TicketData,
+	jobType PrintJobType,
+	machineID string,
+) (*RenderResult, error) {
+	if s == nil || s.jobsRepo == nil {
+		return nil, fmt.Errorf("print jobs repository is not configured")
+	}
+
+	printerID := strings.TrimSpace(ticketData.PrinterID)
+	if printerID == "" {
+		printerID = strings.TrimSpace(machineID)
+	}
+	if printerID == "" {
+		printerID = "default"
+	}
+	if !strings.HasPrefix(printerID, ClientPrinterPrefix) {
+		printerID = ClientPrinterPrefix + printerID
+	}
+
+	var bookingID *string
+	if strings.TrimSpace(ticketData.BookingID) != "" {
+		bookingID = &ticketData.BookingID
+	}
+
+	jobID, status, err := s.jobsRepo.CreateOrGetRenderedJob(
+		ctx, printerID, ticketData.IdempotencyKey, bookingID, jobType, ticketData,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Re-render bytes from the *stored* payload when an idempotent row already exists,
+	// so concurrent retries always see the exact bytes that match the persisted job.
+	// For brand-new rows this is the same as rendering from ticketData directly.
+	renderData := ticketData
+	if status != PrintJobStatusRendered {
+		if existingType, payload, _, gerr := s.jobsRepo.GetJobPayload(ctx, jobID); gerr == nil && len(payload) > 0 {
+			var stored TicketData
+			if uerr := json.Unmarshal(payload, &stored); uerr == nil {
+				renderData = &stored
+				jobType = existingType
+			}
+		}
+	}
+
+	// No printer IP/port for USB delivery; use a logical config for ESC/POS encoding.
+	encConfig := &PrinterConfig{Width: 32, Timeout: 5000, Model: "ESC/POS", Enabled: true}
+	escPosData := s.convertToESCPOS(s.generateContentForJobType(renderData, jobType), encConfig)
+
+	return &RenderResult{
+		JobID:          jobID,
+		Status:         status,
+		ContentBase64:  base64.StdEncoding.EncodeToString(escPosData),
+		AlreadyPrinted: status == PrintJobStatusPrinted,
+		DeliveryMode:   DeliveryModeClientLocal,
+	}, nil
+}
+
+// AckPrintJob records the outcome of a client_local print attempt. It refuses
+// to ack any job whose printer_id does not have the client_local prefix, so a
+// caller cannot use this endpoint to flip the status of a backend_tcp job.
+func (s *Service) AckPrintJob(
+	ctx context.Context,
+	jobID string,
+	ok bool,
+	errMsg string,
+	printedAt time.Time,
+) error {
+	if s == nil || s.jobsRepo == nil {
+		return fmt.Errorf("print jobs repository is not configured")
+	}
+
+	job, err := s.jobsRepo.GetJob(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	if !strings.HasPrefix(job.PrinterID, ClientPrinterPrefix) {
+		return fmt.Errorf("job %s is not a client_local job (printer_id=%q)", jobID, job.PrinterID)
+	}
+
+	if ok {
+		if printedAt.IsZero() {
+			printedAt = time.Now()
+		}
+		if err := s.jobsRepo.MarkAcked(ctx, jobID, true, "", printedAt); err != nil {
+			return err
+		}
+		if s.auditRepo != nil {
+			_ = s.auditRepo.LogPrinted(context.Background(), job.BookingID, job.PrinterID, job.JobType, printedAt)
+		}
+		return nil
+	}
+	return s.jobsRepo.MarkAcked(ctx, jobID, false, errMsg, time.Time{})
+}
+
+var uuidLikePattern = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+var hex24IDPattern = regexp.MustCompile(`^(?i)[0-9a-f]{24}$`)
+
+func looksLikeInternalID(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false
+	}
+	if uuidLikePattern.MatchString(s) {
+		return true
+	}
+	// 24-hex booking ids (substr(md5…)) sometimes appear as createdBy
+	if hex24IDPattern.MatchString(s) {
+		return true
+	}
+	return false
+}
+
+// agentLineForTicket prints one "Agent:" line. Prefer first+last; then createdByName; never show raw ids.
+func agentLineForTicket(d *TicketData) string {
+	first := strings.TrimSpace(d.StaffFirstName)
+	last := strings.TrimSpace(d.StaffLastName)
+	if first != "" || last != "" {
+		return strings.TrimSpace(first + " " + last)
+	}
+	if n := strings.TrimSpace(d.CreatedByName); n != "" && !looksLikeInternalID(n) {
+		return n
+	}
+	by := strings.TrimSpace(d.CreatedBy)
+	if by != "" && !looksLikeInternalID(by) {
+		return by
+	}
+	if by != "" && looksLikeInternalID(by) {
+		return "Agent"
+	}
+	return "Agent"
+}
+
+// Generate ticket content methods
+func (s *Service) generateBookingTicketContent(data *TicketData) string {
+	var content strings.Builder
+
+	// Compact header with company name
+	if data.CompanyName != "" {
+		content.WriteString("================================\n")
+		content.WriteString(fmt.Sprintf("  %s\n", strings.ToUpper("STE DHRAIFF SERVICES TRANSPORT")))
+		content.WriteString("================================\n")
+	}
+
+	// Compact ticket title
+	content.WriteString("     BILLET DE RÉSERVATION\n")
+	content.WriteString("--------------------------------\n")
+
+	// Essential information in compact format
+	content.WriteString(fmt.Sprintf("Vehicule: %s\n", data.LicensePlate))
+	content.WriteString(fmt.Sprintf("Destination: %s\n", data.DestinationName))
+	content.WriteString(fmt.Sprintf("Siège: %d\n", data.SeatNumber))
+
+	// Detailed pricing breakdown
+	if data.BasePrice > 0 {
+		// 200 millimes (0.2 TND) per seat
+		seats := float64(data.SeatNumber)
+		if seats == 0 {
+			seats = 1 // Default to 1 seat if not specified
+		}
+
+		baseTotal := data.BasePrice * seats
+		serviceTotal := pricing.ServiceFeePerSeatTND * seats
+		lineTotal := baseTotal + serviceTotal
+
+		content.WriteString(fmt.Sprintf("Prix de base: %.2f TND\n", baseTotal))
+		content.WriteString(fmt.Sprintf("Frais: %.2f TND\n", serviceTotal))
+		content.WriteString(fmt.Sprintf("Total: %.2f TND\n", lineTotal))
+	} else {
+		content.WriteString(fmt.Sprintf("Montant: %.2f TND\n", data.TotalAmount))
+	}
+
+	content.WriteString(fmt.Sprintf("Date: %s\n", data.CreatedAt.Format("02/01/2006 15:04")))
+	content.WriteString(fmt.Sprintf("Agent: %s\n", agentLineForTicket(data)))
+
+	// Compact footer
+	content.WriteString("--------------------------------\n")
+	content.WriteString("Merci de nous avoir choisis!\n")
+
+	content.WriteString("\n\n")
+
+	return content.String()
+}
+
+func (s *Service) generateEntryTicketContent(data *TicketData) string {
+	var content strings.Builder
+
+	// Compact header with company name
+	if data.CompanyName != "" {
+		content.WriteString("================================\n")
+		content.WriteString(fmt.Sprintf("  %s\n", strings.ToUpper("STE DHRAIFF SERVICES TRANSPORT")))
+		content.WriteString("================================\n")
+	}
+
+	// Compact ticket title
+	content.WriteString("        BILLET D'ENTRÉE\n")
+	content.WriteString("--------------------------------\n")
+
+	// Essential information in compact format
+	content.WriteString(fmt.Sprintf("Vehicule: %s\n", data.LicensePlate))
+	content.WriteString(fmt.Sprintf("Route: %s\n", data.RouteName))
+	content.WriteString(fmt.Sprintf("Date: %s\n", data.CreatedAt.Format("02/01/2006 15:04")))
+	content.WriteString(fmt.Sprintf("Agent: %s\n", agentLineForTicket(data)))
+	// Compact footer
+	content.WriteString("--------------------------------\n")
+	content.WriteString("Bon voyage!\n")
+
+	content.WriteString("\n\n")
+
+	return content.String()
+}
+
+func (s *Service) generateExitTicketContent(data *TicketData) string {
+	var content strings.Builder
+
+	// Compact header with company name
+	if data.CompanyName != "" {
+		content.WriteString("================================\n")
+		content.WriteString(fmt.Sprintf("  %s\n", strings.ToUpper("STE DHRAIFF SERVICES TRANSPORT")))
+		content.WriteString("================================\n")
+	}
+
+	// Compact ticket title
+	content.WriteString("        BILLET DE SORTIE\n")
+	content.WriteString("--------------------------------\n")
+
+	// Essential information in compact format
+	content.WriteString(fmt.Sprintf("Vehicule: %s\n", data.LicensePlate))
+	content.WriteString(fmt.Sprintf("Route: %s\n", data.RouteName))
+	content.WriteString(fmt.Sprintf("Station: %s\n", data.StationName))
+	content.WriteString(fmt.Sprintf("Date: %s\n", data.CreatedAt.Format("02/01/2006 15:04")))
+	content.WriteString(fmt.Sprintf("Agent: %s\n", agentLineForTicket(data)))
+	// Compact footer
+	content.WriteString("--------------------------------\n")
+	content.WriteString("Merci!\n")
+
+	content.WriteString("\n\n")
+
+	return content.String()
+}
+
+func (s *Service) generateDayPassTicketContent(data *TicketData) string {
+	var content strings.Builder
+
+	// Compact header with company name
+	if data.CompanyName != "" {
+		content.WriteString("================================\n")
+		content.WriteString(fmt.Sprintf("  %s\n", strings.ToUpper("STE DHRAIFF SERVICES TRANSPORT")))
+		content.WriteString("================================\n")
+	}
+
+	// Compact ticket title
+	content.WriteString("      BILLET PASS JOURNÉE\n")
+	content.WriteString("--------------------------------\n")
+
+	// Essential information in compact format
+	content.WriteString(fmt.Sprintf("Vehicule: %s\n", data.LicensePlate))
+	content.WriteString(fmt.Sprintf("Route: %s\n", data.RouteName))
+
+	// Day pass: base + 200 millimes / siège, then total (total is authoritative for display)
+	{
+		seats := 1.0
+		if data.SeatNumber > 0 {
+			seats = float64(data.SeatNumber)
+		}
+		feeTotal := pricing.ServiceFeePerSeatTND * seats
+		baseFromPayload := 0.0
+		if data.BasePrice > 0 {
+			baseFromPayload = data.BasePrice * seats
+		}
+		expected := baseFromPayload + feeTotal
+		var baseLine float64
+		if data.BasePrice > 0 && math.Abs(expected-data.TotalAmount) < 0.02 {
+			baseLine = baseFromPayload
+		} else {
+			baseLine = data.TotalAmount - feeTotal
+			if baseLine < 0 {
+				baseLine = 0
+			}
+		}
+		lineTotal := baseLine + feeTotal
+		content.WriteString(fmt.Sprintf("Prix de base: %.2f TND\n", baseLine))
+		content.WriteString(fmt.Sprintf("Frais: %.2f TND\n", feeTotal))
+		content.WriteString(fmt.Sprintf("Total: %.2f TND\n", lineTotal))
+	}
+	content.WriteString(fmt.Sprintf("Date: %s\n", data.CreatedAt.Format("02/01/2006 15:04")))
+	content.WriteString(fmt.Sprintf("Agent: %s\n", agentLineForTicket(data)))
+	// Compact footer
+	content.WriteString("--------------------------------\n")
+	content.WriteString("Valide toute la journée!\n")
+
+	content.WriteString("\n\n")
+
+	return content.String()
+}
+
+func (s *Service) generateExitPassTicketContent(data *TicketData) string {
+	var content strings.Builder
+
+	// Compact header with company name
+	if data.CompanyName != "" {
+		content.WriteString("================================\n")
+		content.WriteString(fmt.Sprintf("  %s\n", strings.ToUpper("STE DHRAIFF SERVICES TRANSPORT")))
+		content.WriteString("================================\n")
+	}
+
+	// Compact ticket title with exit pass count in top right
+	content.WriteString("   🚪 BILLET AUTORISATION SORTIE")
+	// Add spaces to position exit pass count in top right (assuming 32 char width)
+	if data.ExitPassCount > 0 {
+		countSpaces := 32 - 30 - 4 // 32 total - "🚪 BILLET AUTORISATION SORTIE" (30) - count (4) = -2 spaces
+		for i := 0; i < countSpaces; i++ {
+			content.WriteString(" ")
+		}
+		content.WriteString(fmt.Sprintf("(%d)\n", data.ExitPassCount))
+	} else {
+		content.WriteString("\n")
+	}
+	content.WriteString("--------------------------------\n")
+
+	// Essential information in compact format
+	content.WriteString(fmt.Sprintf("Vehicule: %s\n", data.LicensePlate))
+	content.WriteString(fmt.Sprintf("Destination: %s\n", data.DestinationName))
+
+	// Detailed pricing breakdown for exit pass
+	if data.BasePrice > 0 && data.SeatNumber > 0 {
+		// Check if this is an empty vehicle (seatNumber equals vehicle capacity)
+		if data.VehicleCapacity > 0 && data.SeatNumber == data.VehicleCapacity {
+			// Empty vehicle: service fees only (200 millimes per seat × capacity)
+			serviceTotal := pricing.ServiceFeePerSeatTND * float64(data.VehicleCapacity)
+			lineTotal := serviceTotal
+
+			content.WriteString(fmt.Sprintf("Capacité véhicule: %d sièges\n", data.VehicleCapacity))
+			content.WriteString(fmt.Sprintf("Frais: %.2f TND\n", serviceTotal))
+			content.WriteString(fmt.Sprintf("Total: %.2f TND\n", lineTotal))
+		} else {
+			// Vehicle with bookings: base + fees + total
+			baseTotal := data.BasePrice * float64(data.SeatNumber)
+			serviceTotal := pricing.ServiceFeePerSeatTND * float64(data.SeatNumber)
+			lineTotal := baseTotal + serviceTotal
+
+			content.WriteString(fmt.Sprintf("Sièges réservés: %d\n", data.SeatNumber))
+			content.WriteString(fmt.Sprintf("Prix de base: %.2f TND\n", baseTotal))
+			content.WriteString(fmt.Sprintf("Frais: %.2f TND\n", serviceTotal))
+			content.WriteString(fmt.Sprintf("Total: %.2f TND\n", lineTotal))
+		}
+	} else if data.BasePrice > 0 && data.VehicleCapacity > 0 {
+		// Fallback to vehicle capacity if seat number not available
+		baseTotal := data.BasePrice * float64(data.VehicleCapacity)
+		serviceTotal := pricing.ServiceFeePerSeatTND * float64(data.VehicleCapacity)
+		lineTotal := baseTotal + serviceTotal
+
+		content.WriteString(fmt.Sprintf("Capacité véhicule: %d sièges\n", data.VehicleCapacity))
+		content.WriteString(fmt.Sprintf("Prix de base: %.2f TND\n", baseTotal))
+		content.WriteString(fmt.Sprintf("Frais: %.2f TND\n", serviceTotal))
+		content.WriteString(fmt.Sprintf("Total: %.2f TND\n", lineTotal))
+	} else {
+		content.WriteString(fmt.Sprintf("Total: %.2f TND\n", data.TotalAmount))
+	}
+
+	content.WriteString(fmt.Sprintf("Date: %s\n", data.CreatedAt.Format("02/01/2006 15:04")))
+	content.WriteString(fmt.Sprintf("Agent: %s\n", agentLineForTicket(data)))
+	// Compact footer
+	content.WriteString("--------------------------------\n")
+	content.WriteString("🚪 Sortie autorisée!\n")
+
+	content.WriteString("\n\n")
+
+	return content.String()
+}
+
+func (s *Service) generateTalonContent(data *TicketData) string {
+	var content strings.Builder
+
+	content.WriteString("================================\n")
+	content.WriteString(fmt.Sprintf("  %s\n", strings.ToUpper("STE DHRAIFF SERVICES TRANSPORT")))
+	content.WriteString("================================\n")
+	content.WriteString(fmt.Sprintf("Vehicule: %s\n", data.LicensePlate))
+	if data.DestinationName != "" {
+		content.WriteString(fmt.Sprintf("Destination: %s\n", data.DestinationName))
+	}
+	content.WriteString("--------------------------------\n")
+	content.WriteString("INDEX SIEGE:\n")
+	content.WriteString(fmt.Sprintf("{{BIG_INDEX:%d}}\n", data.SeatNumber))
+	content.WriteString("--------------------------------\n")
+	if data.BasePrice > 0 {
+		seats := float64(data.SeatNumber)
+		if seats < 1 {
+			seats = 1
+		}
+		baseTotal := data.BasePrice * seats
+		serviceTotal := pricing.ServiceFeePerSeatTND * seats
+		lineTotal := baseTotal + serviceTotal
+		content.WriteString(fmt.Sprintf("Prix de base: %.2f TND\n", baseTotal))
+		content.WriteString(fmt.Sprintf("Frais: %.2f TND\n", serviceTotal))
+		content.WriteString(fmt.Sprintf("Total: %.2f TND\n", lineTotal))
+	} else {
+		content.WriteString(fmt.Sprintf("Montant: %.2f TND\n", data.TotalAmount))
+	}
+	content.WriteString(fmt.Sprintf("Heure: %s\n", data.CreatedAt.Format("02/01/2006 15:04")))
+	content.WriteString(fmt.Sprintf("Agent: %s\n", agentLineForTicket(data)))
+	content.WriteString("================================\n\n")
+
+	return content.String()
+}
+
+func (s *Service) generateStandardTicketContent(data *TicketData) string {
+	var content strings.Builder
+
+	// Compact header with company name
+	if data.CompanyName != "" {
+		content.WriteString("================================\n")
+		content.WriteString(fmt.Sprintf("  %s\n", strings.ToUpper("STE DHRAIFF SERVICES TRANSPORT")))
+		content.WriteString("================================\n")
+	}
+
+	// Compact ticket title
+	content.WriteString("        BILLET STANDARD\n")
+	content.WriteString("--------------------------------\n")
+
+	// Essential information in compact format
+	content.WriteString(fmt.Sprintf("Vehicule: %s\n", data.LicensePlate))
+	content.WriteString(fmt.Sprintf("Destination: %s\n", data.DestinationName))
+	content.WriteString(fmt.Sprintf("Montant: %.2f TND\n", data.TotalAmount))
+	content.WriteString(fmt.Sprintf("Date: %s\n", data.CreatedAt.Format("02/01/2006 15:04")))
+	content.WriteString(fmt.Sprintf("Agent: %s\n", agentLineForTicket(data)))
+	// Compact footer
+	content.WriteString("--------------------------------\n")
+	content.WriteString("Merci!\n")
+
+	content.WriteString("\n\n")
+
+	return content.String()
+}
+
+// Convert text content to ESC/POS commands
+func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte {
+	var buffer bytes.Buffer
+
+	// Initialize printer
+	buffer.WriteByte(0x1B) // ESC
+	buffer.WriteByte(0x40) // @
+
+	// Helper to set text alignment.
+	setAlign := func(mode byte) {
+		buffer.WriteByte(0x1B) // ESC
+		buffer.WriteByte(0x61) // a
+		buffer.WriteByte(mode) // 0=left,1=center,2=right
+	}
+
+	// Helper to set text style using ESC !.
+	setTextStyle := func(mode byte) {
+		buffer.WriteByte(0x1B) // ESC
+		buffer.WriteByte(0x21) // !
+		buffer.WriteByte(mode) // 0x00 normal, 0x08 emphasized
+	}
+
+	// Helper to set character scaling using GS !.
+	setTextScale := func(mode byte) {
+		buffer.WriteByte(0x1D) // GS
+		buffer.WriteByte(0x21) // !
+		buffer.WriteByte(mode) // 0x00 normal, 0x11 2x, 0x22 3x
+	}
+
+	// Reset print style to a known baseline.
+	resetStyle := func() {
+		setAlign(0x00)
+		setTextStyle(0x00)
+		setTextScale(0x00)
+	}
+
+	isTitleLine := func(line string) bool {
+		return strings.Contains(line, "BILLET") ||
+			strings.Contains(line, "TALON") ||
+			strings.Contains(line, "AUTORISATION") ||
+			strings.Contains(line, "STANDARD") ||
+			strings.Contains(line, "RESERVATION")
+	}
+
+	resetStyle()
+
+	// Print content
+	lines := strings.Split(content, "\n")
+	for _, line := range lines {
+		// Dedicated marker for printing the ticket index in large, centered text.
+		if strings.HasPrefix(line, "{{BIG_INDEX:") && strings.HasSuffix(line, "}}") {
+			value := strings.TrimSuffix(strings.TrimPrefix(line, "{{BIG_INDEX:"), "}}")
+			setAlign(0x01)
+			setTextStyle(0x08)
+			setTextScale(0x22)
+			buffer.WriteString(value)
+			buffer.WriteByte(0x0A) // Line feed
+			resetStyle()
+			continue
+		}
+
+		// Compact centered line (Font B) for long company names.
+		if strings.HasPrefix(line, "{{CENTER_SMALL:") && strings.HasSuffix(line, "}}") {
+			value := strings.TrimSuffix(strings.TrimPrefix(line, "{{CENTER_SMALL:"), "}}")
+			setAlign(0x01)
+			setTextStyle(0x01) // Font B (smaller)
+			setTextScale(0x00)
+			buffer.WriteString(value)
+			buffer.WriteByte(0x0A) // Line feed
+			resetStyle()
+			continue
+		}
+
+		switch {
+		case isTitleLine(line):
+			setAlign(0x01)
+			setTextStyle(0x08)
+			setTextScale(0x00)
+		case strings.HasPrefix(line, "INDEX SIEGE:"):
+			setAlign(0x01)
+			setTextStyle(0x08)
+			setTextScale(0x00)
+		case strings.HasPrefix(line, "====") || strings.HasPrefix(line, "----"):
+			setAlign(0x01)
+			setTextStyle(0x00)
+			setTextScale(0x00)
+		default:
+			setAlign(0x00)
+			setTextStyle(0x00)
+			setTextScale(0x00)
+		}
+
+		buffer.WriteString(line)
+		buffer.WriteByte(0x0A) // Line feed
+	}
+
+	resetStyle()
+
+	// Add extra line feeds before cutting to ensure all content is printed
+	buffer.WriteByte(0x0A) // Line feed
+	buffer.WriteByte(0x0A) // Line feed
+
+	// Cut paper
+	buffer.WriteByte(0x1D) // GS
+	buffer.WriteByte(0x56) // V
+	buffer.WriteByte(0x00) // Full cut
+
+	return buffer.Bytes()
+}
+
+// Helper function to generate unique job ID
+func generateJobID() string {
+	return fmt.Sprintf("job_%d", time.Now().UnixNano())
+}

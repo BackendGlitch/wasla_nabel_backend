@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+echo "[pre-commit] Syncing generated route matrix..."
+npm run -s routes:sync
+
+if ! git diff --quiet -- docs/API_ROUTES.generated.md; then
+  echo "[pre-commit] docs/API_ROUTES.generated.md changed. Add it to your commit."
+  git --no-pager diff -- docs/API_ROUTES.generated.md
+  exit 1
+fi
+
+echo "[pre-commit] Checking API docs and Postman coverage..."
+npm run -s docs:check
+
+echo "[pre-commit] API docs checks passed."

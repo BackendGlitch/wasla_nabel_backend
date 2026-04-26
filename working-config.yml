@@ -1,0 +1,5 @@
+tunnel: wasla-tunnel
+credentials-file: /home/ste/.cloudflared/ed084530-77ef-43e2-96b7-95d825e11e37.json
+
+ingress:
+  - service: http://localhost:8001

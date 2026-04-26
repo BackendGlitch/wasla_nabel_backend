@@ -1,0 +1,47 @@
+name: API Docs Drift Check
+
+on:
+  push:
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - 'docs/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/api-docs-check.yml'
+  pull_request:
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - 'docs/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/api-docs-check.yml'
+
+jobs:
+  verify-api-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Regenerate API route matrix
+        run: npm run routes:sync
+
+      - name: Ensure generated matrix is committed
+        run: git diff --exit-code -- docs/API_ROUTES.generated.md
+
+      - name: Check API docs coverage
+        run: npm run docs:check

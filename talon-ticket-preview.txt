@@ -1,0 +1,7 @@
+Vehicule: 123 TU 4567
+                        (3)
+-----
+Montant: 13.95 TND
+Heure: 20/02/2026 14:30
+Agent: Ali Ben Salah
+

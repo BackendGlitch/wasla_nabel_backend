@@ -1,0 +1,21 @@
+
+# Ignore logs, backups, dumps
+*.log
+*.pid
+backup_*.sql
+backup_*.dump
+
+# Ignore root-level compiled binaries
+/main
+/auth-service
+/booking-service
+/queue-service
+/websocket-hub
+/printer-service
+/statistics-service
+/public-service
+
+# Station Cloudflare automation secrets/state
+configs/cloudflare-station.env
+configs/station-cloudflare-state.json
+bin/

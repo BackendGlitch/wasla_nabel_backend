@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: station-postgres
+    environment:
+      POSTGRES_DB: main-ste
+      POSTGRES_USER: ivan
+      POSTGRES_PASSWORD: Lost2409
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    networks:
+      - station-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: station-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - station-network
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.auth
+    container_name: station-auth-service
+    environment:
+      - DATABASE_URL=postgresql://ivan:Lost2409@postgres:5432/main-ste?sslmode=disable&timezone=Africa/Tunis
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET_KEY=your-secret-key-change-this-in-production
+      - AUTH_SERVICE_PORT=8001
+    ports:
+      - "8001:8001"
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - station-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  station-network:
+    driver: bridge

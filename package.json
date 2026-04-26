@@ -1,0 +1,22 @@
+{
+  "name": "station-backend",
+  "version": "1.0.0",
+  "description": "A robust, high-performance backend system built with Go and Gin for managing transportation station operations.",
+  "main": "test-websocket.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "routes:sync": "node scripts/sync-api-route-matrix.js",
+    "docs:check": "node scripts/check-api-docs.js",
+    "docs:sync": "npm run routes:sync && npm run docs:check",
+    "routes:verify": "node scripts/verify-routes.js --cin 14045739",
+    "postman:push": "node scripts/push-postman-collection.js",
+    "hooks:install": "bash scripts/install-git-hooks.sh",
+    "prepare": "npm run hooks:install"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "ws": "^8.18.3"
+  }
+}

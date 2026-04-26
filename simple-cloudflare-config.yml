@@ -1,0 +1,9 @@
+tunnel: wasla-tunnel
+credentials-file: /home/ste/.cloudflared/ed084530-77ef-43e2-96b7-95d825e11e37.json
+
+ingress:
+  # Auth Service (port 8001) - Main service
+  - service: http://localhost:8001
+    
+  # Catch-all rule
+  - service: http_status:404

@@ -1,0 +1,16 @@
+[Unit]
+Description=Wasla DB migrations
+After=network.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/ste/wasla_backend
+EnvironmentFile=/home/ste/wasla_backend/configs/environment.env
+ExecStart=/home/ste/wasla_backend/scripts/apply-migrations.sh
+User=ste
+Group=ste
+
+[Install]
+WantedBy=wasla-backend.target
+

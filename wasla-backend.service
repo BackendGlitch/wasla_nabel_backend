@@ -1,0 +1,17 @@
+[Unit]
+Description=Wasla Backend Services
+After=network.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/home/ste/wasla_backend
+EnvironmentFile=/home/ste/wasla_backend/configs/environment.env
+ExecStart=/bin/bash -c 'cd /home/ste/wasla_backend && /home/ste/wasla_backend/start-persistent-services.sh start'
+ExecStop=/bin/bash -c 'cd /home/ste/wasla_backend && /home/ste/wasla_backend/start-persistent-services.sh stop'
+User=ste
+Group=ste
+
+[Install]
+WantedBy=multi-user.target

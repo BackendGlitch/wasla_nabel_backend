@@ -1,0 +1,2336 @@
+{
+  "info": {
+    "_postman_id": "b26f84f7-7260-45a4-a7d7-9e6756ea0e88",
+    "name": "Wasla Backend API",
+    "description": "## Wasla Backend API Overview\n\nWasla is a station operations backend for transport flow management. It handles staff authentication, vehicle queueing, seat bookings, ticket printing, statistics, and real-time WebSocket updates across station services.\n\n### Services in this collection\n- Auth Service: login, session refresh/logout, staff management\n- Queue Service: routes, vehicles, queue lifecycle, day passes\n- Booking Service: seat booking, cancellation, trips, ghost bookings\n- Printer Service: printer config, print queue, ticket endpoints\n- Statistics Service: staff/station income and real-time stats feeds\n- WebSocket Hub Service: station broadcast and connection management\n\n### Quick start\n1. Set `server_ip` (defaults to `localhost`).\n2. Run **Auth Service > Login** with `staff_cin` to auto-store `token`.\n3. Use protected endpoints (Authorization header is preconfigured).\n\nThis collection is synchronized with backend routes from source code and checked by `npm run docs:check`.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Auth Service",
+      "item": [
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{auth_base_url}}/health"
+          },
+          "response": []
+        },
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{auth_base_url}}/api/v1/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cin\": \"{{staff_cin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "",
+                  "let jsonData = {};",
+                  "try { jsonData = pm.response.json(); } catch (e) {}",
+                  "if (jsonData?.data?.token) {",
+                  "  pm.collectionVariables.set('token', jsonData.data.token);",
+                  "}",
+                  "if (jsonData?.data?.staff?.id) {",
+                  "  pm.collectionVariables.set('staff_id', jsonData.data.staff.id);",
+                  "  pm.collectionVariables.set('staff_target_id', jsonData.data.staff.id);",
+                  "}",
+                  ""
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Refresh Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{auth_base_url}}/api/v1/auth/refresh"
+          },
+          "response": []
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{auth_base_url}}/api/v1/auth/logout"
+          },
+          "response": []
+        },
+        {
+          "name": "List Staff",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{auth_base_url}}/api/v1/staff/"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Staff By ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{auth_base_url}}/api/v1/staff/{{staff_target_id}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Create Staff",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{auth_base_url}}/api/v1/staff/",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cin\": \"12345678\",\n  \"phoneNumber\": \"+21620000000\",\n  \"firstName\": \"Test\",\n  \"lastName\": \"Staff\",\n  \"role\": \"WORKER\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Staff",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{auth_base_url}}/api/v1/staff/{{staff_target_id}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phoneNumber\": \"+21621111111\",\n  \"firstName\": \"Updated\",\n  \"lastName\": \"Name\",\n  \"role\": \"SUPERVISOR\",\n  \"isActive\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Staff",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{auth_base_url}}/api/v1/staff/{{staff_target_id}}"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Queue Service",
+      "item": [
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{queue_base_url}}/health"
+          },
+          "response": []
+        },
+        {
+          "name": "OpenAPI Queue",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{queue_base_url}}/openapi-queue.json"
+          },
+          "response": []
+        },
+        {
+          "name": "Docs Queue",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{queue_base_url}}/docs-queue"
+          },
+          "response": []
+        },
+        {
+          "name": "OpenAPI All",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{queue_base_url}}/openapi-all.json"
+          },
+          "response": []
+        },
+        {
+          "name": "Docs All",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{queue_base_url}}/docs-all"
+          },
+          "response": []
+        },
+        {
+          "name": "List Routes",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{queue_base_url}}/api/v1/routes"
+          },
+          "response": []
+        },
+        {
+          "name": "Create Route",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{queue_base_url}}/api/v1/routes",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stationId\": \"{{destination_id}}\",\n  \"stationName\": \"Tunis\",\n  \"basePrice\": 5,\n  \"governorate\": \"Tunis\",\n  \"delegation\": \"Bab Bhar\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Route",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{queue_base_url}}/api/v1/routes/{{route_id}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stationName\": \"Tunis Updated\",\n  \"basePrice\": 5.5,\n  \"isActive\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Route",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{queue_base_url}}/api/v1/routes/{{route_id}}"
+          },
+          "response": []
+        },
+        {
+          "name": "List Vehicles",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{queue_base_url}}/api/v1/vehicles"
+          },
+          "response": []
+        },
+        {
+          "name": "List Vehicles (search query)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{queue_base_url}}/api/v1/vehicles?search=123"
+          },
+          "response": []
+        },
+        {
+          "name": "Search Vehicles",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{queue_base_url}}/api/v1/vehicles/search?q=123"
+          },
+          "response": []
+        },
+        {
+          "name": "Create Vehicle",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{queue_base_url}}/api/v1/vehicles",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"licensePlate\": \"123 TUN 4567\",\n  \"capacity\": 8,\n  \"phoneNumber\": \"+21622000000\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Vehicle",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{queue_base_url}}/api/v1/vehicles/{{vehicle_id}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"capacity\": 8,\n  \"isActive\": true,\n  \"isAvailable\": true,\n  \"isBanned\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Vehicle",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{queue_base_url}}/api/v1/vehicles/{{vehicle_id}}"
+          },
+          "response": []
+        },
+        {
+          "name": "List Vehicle Authorized Routes",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{queue_base_url}}/api/v1/vehicles/{{vehicle_id}}/authorized-routes"
+          },
+          "response": []
+        },
+        {
+          "name": "Add Vehicle Authorized Route",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{queue_base_url}}/api/v1/vehicles/{{vehicle_id}}/authorized-routes",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stationId\": \"{{destination_id}}\",\n  \"stationName\": \"Tunis\",\n  \"priority\": 1,\n  \"isDefault\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Vehicle Authorized Route",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{queue_base_url}}/api/v1/vehicles/{{vehicle_id}}/authorized-routes/{{auth_id}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"priority\": 2,\n  \"isDefault\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Vehicle Authorized Route",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{queue_base_url}}/api/v1/vehicles/{{vehicle_id}}/authorized-routes/{{auth_id}}"
+          },
+          "response": []
+        },
+        {
+          "name": "List Queue",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{queue_base_url}}/api/v1/queue/{{destination_id}}"
+          },
+          "response": []
+        },
+        {
+          "name": "List Queue (subRoute)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{queue_base_url}}/api/v1/queue/{{destination_id}}?subRoute=A"
+          },
+          "response": []
+        },
+        {
+          "name": "Add Queue Entry",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{queue_base_url}}/api/v1/queue/{{destination_id}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"vehicleId\": \"{{vehicle_id}}\",\n  \"destinationName\": \"Tunis\",\n  \"subRoute\": \"A\",\n  \"subRouteName\": \"Line A\",\n  \"queueType\": \"REGULAR\",\n  \"createdBy\": \"{{staff_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Reorder Queue",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{queue_base_url}}/api/v1/queue/{{destination_id}}/reorder",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entryIds\": [\n    \"{{queue_entry_id}}\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Queue Entry",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{queue_base_url}}/api/v1/queue/{{destination_id}}/entry/{{queue_entry_id}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"LOADING\",\n  \"availableSeats\": 4\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Queue Entry",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{queue_base_url}}/api/v1/queue/{{destination_id}}/entry/{{queue_entry_id}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Move Queue Entry",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{queue_base_url}}/api/v1/queue/{{destination_id}}/entry/{{queue_entry_id}}/move",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"newPosition\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Transfer Seats",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{queue_base_url}}/api/v1/queue/{{destination_id}}/transfer-seats",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fromEntryId\": \"{{queue_entry_id}}\",\n  \"toEntryId\": \"{{queue_entry_id_2}}\",\n  \"seats\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Change Entry Destination",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{queue_base_url}}/api/v1/queue/{{destination_id}}/entry/{{queue_entry_id}}/change-destination",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"newDestinationId\": \"{{destination_id_2}}\",\n  \"newDestinationName\": \"Sfax\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Clear Destination Queue",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{queue_base_url}}/api/v1/queue/{{destination_id}}/clear"
+          },
+          "response": []
+        },
+        {
+          "name": "Clear All Queues",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{queue_base_url}}/api/v1/queue/clear-all"
+          },
+          "response": []
+        },
+        {
+          "name": "Queue Summaries",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{queue_base_url}}/api/v1/queue-summaries"
+          },
+          "response": []
+        },
+        {
+          "name": "Queue Summaries (station)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{queue_base_url}}/api/v1/queue-summaries?station={{station_id}}"
+          },
+          "response": []
+        },
+        {
+          "name": "List Destinations",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{queue_base_url}}/api/v1/destinations"
+          },
+          "response": []
+        },
+        {
+          "name": "Route Summaries",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{queue_base_url}}/api/v1/route-summaries"
+          },
+          "response": []
+        },
+        {
+          "name": "List Day Passes",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{queue_base_url}}/api/v1/day-passes"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Vehicle Day Pass",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{queue_base_url}}/api/v1/day-pass/vehicle/{{vehicle_id}}"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Booking Service",
+      "item": [
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{booking_base_url}}/health"
+          },
+          "response": []
+        },
+        {
+          "name": "OpenAPI",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{booking_base_url}}/openapi.json"
+          },
+          "response": []
+        },
+        {
+          "name": "Docs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{booking_base_url}}/docs"
+          },
+          "response": []
+        },
+        {
+          "name": "Create Booking By Destination",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{booking_base_url}}/api/v1/bookings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"destinationId\": \"{{destination_id}}\",\n  \"seats\": 1,\n  \"staffId\": \"{{staff_id}}\",\n  \"subRoute\": \"A\",\n  \"preferExactFit\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Booking By Queue Entry",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{booking_base_url}}/api/v1/bookings/by-queue-entry",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"queueEntryId\": \"{{queue_entry_id}}\",\n  \"seats\": 1,\n  \"staffId\": \"{{staff_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel One Booking By Queue Entry",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{booking_base_url}}/api/v1/bookings/cancel-one-by-queue-entry",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"queueEntryId\": \"{{queue_entry_id}}\",\n  \"staffId\": \"{{staff_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel Booking By ID",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{booking_base_url}}/api/v1/bookings/{{booking_id}}/cancel",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"staffId\": \"{{staff_id}}\",\n  \"reason\": \"Customer request\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Ghost Booking",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{booking_base_url}}/api/v1/bookings/ghost",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"destinationId\": \"{{destination_id}}\",\n  \"seats\": 1,\n  \"staffId\": \"{{staff_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Ghost Booking Count",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{booking_base_url}}/api/v1/bookings/ghost/count?destination_id={{destination_id}}"
+          },
+          "response": []
+        },
+        {
+          "name": "List Trips",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{booking_base_url}}/api/v1/trips"
+          },
+          "response": []
+        },
+        {
+          "name": "List Today Trips",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{booking_base_url}}/api/v1/trips/today"
+          },
+          "response": []
+        },
+        {
+          "name": "List Today Trips (search)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{booking_base_url}}/api/v1/trips/today?search=123"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Today Trips Count",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{booking_base_url}}/api/v1/trips/today/count"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Today Trips Count By Destination",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{booking_base_url}}/api/v1/trips/today/count?destination_id={{destination_id}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Today Trips Count By License Plate",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{booking_base_url}}/api/v1/trips/count-by-license?license_plate=123%20TUN%204567"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Printer Service",
+      "item": [
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{printer_base_url}}/health"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Printer Config",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{printer_base_url}}/api/printer/config/{{printer_id}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Update Printer Config",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{printer_base_url}}/api/printer/config/{{printer_id}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{printer_id}}\",\n  \"name\": \"TM-T20X Thermal Printer\",\n  \"ip\": \"192.168.1.50\",\n  \"port\": 9100,\n  \"width\": 48,\n  \"timeout\": 10000,\n  \"model\": \"TM-T20X\",\n  \"enabled\": true,\n  \"isDefault\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Test Printer Connection",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{printer_base_url}}/api/printer/test/{{printer_id}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Print Queue",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{printer_base_url}}/api/printer/queue"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Print Queue Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{printer_base_url}}/api/printer/queue/status"
+          },
+          "response": []
+        },
+        {
+          "name": "Add Print Job",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{printer_base_url}}/api/printer/queue/add",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jobType\": \"booking_ticket\",\n  \"content\": \"TEST CONTENT\",\n  \"staffName\": \"Test Staff\",\n  \"priority\": 100\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Print Booking Ticket",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{printer_base_url}}/api/printer/print/booking",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"licensePlate\": \"123 TUN 4567\",\n  \"destinationName\": \"Tunis\",\n  \"seatNumber\": 1,\n  \"totalAmount\": 5.15,\n  \"createdBy\": \"{{staff_id}}\",\n  \"createdAt\": \"2026-02-15T10:30:00Z\",\n  \"stationName\": \"Main Station\",\n  \"routeName\": \"Tunis Route\",\n  \"vehicleCapacity\": 8,\n  \"basePrice\": 5,\n  \"exitPassCount\": 1,\n  \"companyName\": \"STE DHRAIFF SERVICES TRANSPORT\",\n  \"companyLogo\": \"\",\n  \"staffFirstName\": \"Ali\",\n  \"staffLastName\": \"Ben Salah\",\n  \"printerConfig\": {\n    \"ip\": \"192.168.1.50\",\n    \"port\": 9100\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Print Entry Ticket",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{printer_base_url}}/api/printer/print/entry",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"licensePlate\": \"123 TUN 4567\",\n  \"destinationName\": \"Tunis\",\n  \"seatNumber\": 1,\n  \"totalAmount\": 5.15,\n  \"createdBy\": \"{{staff_id}}\",\n  \"createdAt\": \"2026-02-15T10:30:00Z\",\n  \"stationName\": \"Main Station\",\n  \"routeName\": \"Tunis Route\",\n  \"vehicleCapacity\": 8,\n  \"basePrice\": 5,\n  \"exitPassCount\": 1,\n  \"companyName\": \"STE DHRAIFF SERVICES TRANSPORT\",\n  \"companyLogo\": \"\",\n  \"staffFirstName\": \"Ali\",\n  \"staffLastName\": \"Ben Salah\",\n  \"printerConfig\": {\n    \"ip\": \"192.168.1.50\",\n    \"port\": 9100\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Print Exit Ticket",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{printer_base_url}}/api/printer/print/exit",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"licensePlate\": \"123 TUN 4567\",\n  \"destinationName\": \"Tunis\",\n  \"seatNumber\": 1,\n  \"totalAmount\": 5.15,\n  \"createdBy\": \"{{staff_id}}\",\n  \"createdAt\": \"2026-02-15T10:30:00Z\",\n  \"stationName\": \"Main Station\",\n  \"routeName\": \"Tunis Route\",\n  \"vehicleCapacity\": 8,\n  \"basePrice\": 5,\n  \"exitPassCount\": 1,\n  \"companyName\": \"STE DHRAIFF SERVICES TRANSPORT\",\n  \"companyLogo\": \"\",\n  \"staffFirstName\": \"Ali\",\n  \"staffLastName\": \"Ben Salah\",\n  \"printerConfig\": {\n    \"ip\": \"192.168.1.50\",\n    \"port\": 9100\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Print Day Pass Ticket",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{printer_base_url}}/api/printer/print/daypass",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"licensePlate\": \"123 TUN 4567\",\n  \"destinationName\": \"Tunis\",\n  \"seatNumber\": 1,\n  \"totalAmount\": 5.15,\n  \"createdBy\": \"{{staff_id}}\",\n  \"createdAt\": \"2026-02-15T10:30:00Z\",\n  \"stationName\": \"Main Station\",\n  \"routeName\": \"Tunis Route\",\n  \"vehicleCapacity\": 8,\n  \"basePrice\": 5,\n  \"exitPassCount\": 1,\n  \"companyName\": \"STE DHRAIFF SERVICES TRANSPORT\",\n  \"companyLogo\": \"\",\n  \"staffFirstName\": \"Ali\",\n  \"staffLastName\": \"Ben Salah\",\n  \"printerConfig\": {\n    \"ip\": \"192.168.1.50\",\n    \"port\": 9100\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Print Exit Pass Ticket",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{printer_base_url}}/api/printer/print/exitpass",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"licensePlate\": \"123 TUN 4567\",\n  \"destinationName\": \"Tunis\",\n  \"seatNumber\": 1,\n  \"totalAmount\": 5.15,\n  \"createdBy\": \"{{staff_id}}\",\n  \"createdAt\": \"2026-02-15T10:30:00Z\",\n  \"stationName\": \"Main Station\",\n  \"routeName\": \"Tunis Route\",\n  \"vehicleCapacity\": 8,\n  \"basePrice\": 5,\n  \"exitPassCount\": 1,\n  \"companyName\": \"STE DHRAIFF SERVICES TRANSPORT\",\n  \"companyLogo\": \"\",\n  \"staffFirstName\": \"Ali\",\n  \"staffLastName\": \"Ben Salah\",\n  \"printerConfig\": {\n    \"ip\": \"192.168.1.50\",\n    \"port\": 9100\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Print Exit Pass And Remove From Queue",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{printer_base_url}}/api/printer/print/exitpass-and-remove",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"queueEntryId\": \"{{queue_entry_id}}\",\n  \"licensePlate\": \"123 TUN 4567\",\n  \"destinationName\": \"Tunis\",\n  \"bookedSeats\": 3,\n  \"totalSeats\": 8,\n  \"basePrice\": 5,\n  \"createdBy\": \"{{staff_id}}\",\n  \"stationName\": \"Main Station\",\n  \"routeName\": \"Tunis Route\",\n  \"exitPassCount\": 10,\n  \"companyName\": \"STE DHRAIFF SERVICES TRANSPORT\",\n  \"companyLogo\": \"\",\n  \"staffFirstName\": \"Ali\",\n  \"staffLastName\": \"Ben Salah\",\n  \"printerConfig\": {\n    \"ip\": \"192.168.1.50\",\n    \"port\": 9100\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Print Talon",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{printer_base_url}}/api/printer/print/talon",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"licensePlate\": \"123 TUN 4567\",\n  \"destinationName\": \"Tunis\",\n  \"seatNumber\": 1,\n  \"totalAmount\": 5.15,\n  \"createdBy\": \"{{staff_id}}\",\n  \"createdAt\": \"2026-02-15T10:30:00Z\",\n  \"stationName\": \"Main Station\",\n  \"routeName\": \"Tunis Route\",\n  \"vehicleCapacity\": 8,\n  \"basePrice\": 5,\n  \"exitPassCount\": 1,\n  \"companyName\": \"STE DHRAIFF SERVICES TRANSPORT\",\n  \"companyLogo\": \"\",\n  \"staffFirstName\": \"Ali\",\n  \"staffLastName\": \"Ben Salah\",\n  \"printerConfig\": {\n    \"ip\": \"192.168.1.50\",\n    \"port\": 9100\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Statistics Service",
+      "item": [
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{statistics_base_url}}/health"
+          },
+          "response": []
+        },
+        {
+          "name": "Staff Daily Income",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{statistics_base_url}}/api/v1/statistics/staff/{{staff_id}}/daily"
+          },
+          "response": []
+        },
+        {
+          "name": "Staff Daily Income (date)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{statistics_base_url}}/api/v1/statistics/staff/{{staff_id}}/daily?date={{date}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Staff Today Income",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{statistics_base_url}}/api/v1/statistics/staff/{{staff_id}}/today"
+          },
+          "response": []
+        },
+        {
+          "name": "Staff Income Range",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{statistics_base_url}}/api/v1/statistics/staff/{{staff_id}}/range?startDate={{start_date}}&endDate={{end_date}}"
+          },
+          "response": []
+        },
+        {
+          "name": "All Staff Income For Date",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{statistics_base_url}}/api/v1/statistics/staff/all?date={{date}}"
+          },
+          "response": []
+        },
+        {
+          "name": "All Staff Income For Month",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{statistics_base_url}}/api/v1/statistics/staff/all-month?year={{year}}&month={{month}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Staff Transactions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{statistics_base_url}}/api/v1/statistics/staff/{{staff_id}}/transactions?limit=100"
+          },
+          "response": []
+        },
+        {
+          "name": "Station Daily Income",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{statistics_base_url}}/api/v1/statistics/station/{{station_id}}/daily"
+          },
+          "response": []
+        },
+        {
+          "name": "Station Daily Income (date)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{statistics_base_url}}/api/v1/statistics/station/{{station_id}}/daily?date={{date}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Station Today Income",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{statistics_base_url}}/api/v1/statistics/station/{{station_id}}/today"
+          },
+          "response": []
+        },
+        {
+          "name": "Station Income Range",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{statistics_base_url}}/api/v1/statistics/station/{{station_id}}/range?startDate={{start_date}}&endDate={{end_date}}"
+          },
+          "response": []
+        },
+        {
+          "name": "All Station Income For Date",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{statistics_base_url}}/api/v1/statistics/station/all?date={{date}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Station Transactions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{statistics_base_url}}/api/v1/statistics/station/{{station_id}}/transactions?limit=100"
+          },
+          "response": []
+        },
+        {
+          "name": "Statistics WebSocket Endpoint",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{statistics_base_url}}/api/v1/statistics/ws"
+          },
+          "response": []
+        },
+        {
+          "name": "Trigger Statistics Broadcast",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{statistics_base_url}}/api/v1/statistics/broadcast"
+          },
+          "response": []
+        },
+        {
+          "name": "Actual Income",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{statistics_base_url}}/api/v1/statistics/income/actual"
+          },
+          "response": []
+        },
+        {
+          "name": "Actual Income (date)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{statistics_base_url}}/api/v1/statistics/income/actual?date={{date}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Actual Income Period",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{statistics_base_url}}/api/v1/statistics/income/period?start={{start_rfc3339}}&end={{end_rfc3339}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Actual Income Day",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{statistics_base_url}}/api/v1/statistics/income/day?date={{date}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Actual Income Month",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{statistics_base_url}}/api/v1/statistics/income/month?year={{year}}&month={{month}}"
+          },
+          "response": []
+        },
+        {
+          "name": "All Station Income For Month",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{statistics_base_url}}/api/v1/statistics/station/all-month?year={{year}}&month={{month}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Statistics Overview Day",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{statistics_base_url}}/api/v1/statistics/overview/day?date={{date}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Statistics Overview Month",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{statistics_base_url}}/api/v1/statistics/overview/month?year={{year}}&month={{month}}"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "WebSocket Hub Service",
+      "item": [
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{websocket_base_url}}/health"
+          },
+          "response": []
+        },
+        {
+          "name": "Connect Queue WebSocket (HTTP upgrade endpoint)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{websocket_base_url}}/ws/queue/{{station_id}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Connect Queue WebSocket (token query fallback)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{websocket_base_url}}/ws/queue/{{station_id}}?token={{token}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Admin Broadcast Message",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{websocket_base_url}}/admin/broadcast",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stationId\": \"{{station_id}}\",\n  \"type\": \"test_message\",\n  \"data\": {\n    \"message\": \"Hello from Postman\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Admin Connection Stats",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{websocket_base_url}}/admin/stats"
+          },
+          "response": []
+        },
+        {
+          "name": "Admin Connection Stats (by station)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{websocket_base_url}}/admin/stats?stationId={{station_id}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Admin Test Connection",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{websocket_base_url}}/admin/test/{{station_id}}"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Public Service",
+      "item": [
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{public_base_url}}/health"
+          },
+          "response": []
+        },
+        {
+          "name": "Initialize Station Info",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{public_base_url}}/info",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Sousse Station\",\n  \"location\": \"Sahloul\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Initializes local station metadata once. `public_ip` is resolved server-side: Tailscale IPv4 first (if a `tailscale*` interface exists), otherwise public IPv4 from external providers. If station config already exists, endpoint returns `200` with `already_configured: true` and an informational message."
+          },
+          "response": [
+            {
+              "name": "200 OK - Already Configured",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": "{{public_base_url}}/info",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Sousse Station\",\n  \"location\": \"Sahloul\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"station_id\": \"st_existing\",\n  \"name\": \"Sousse Station\",\n  \"location\": \"Sahloul\",\n  \"public_ip\": \"100.90.10.2\",\n  \"already_configured\": true,\n  \"message\": \"Station is already configured and cannot be configured again\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Station Info",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{public_base_url}}/info",
+            "description": "Returns station metadata and uptime. `public_ip` is resolved server-side: Tailscale IPv4 first (if a `tailscale*` interface exists), otherwise public IPv4 from external providers."
+          },
+          "response": []
+        },
+        {
+          "name": "List Routes Availability",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{public_base_url}}/routes"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Route Vehicles",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{public_base_url}}/routes/{{destination_id}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Create Booking Hold",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{public_base_url}}/bookings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"destination_id\": \"{{destination_id}}\",\n  \"seats_booked\": 2,\n  \"booking_source\": \"CENTRAL\",\n  \"booking_type\": \"ONLINE\",\n  \"user_ref\": \"central_user_123\",\n  \"idempotency_key\": \"{{$guid}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Booking",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{public_base_url}}/bookings/{{booking_id}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Confirm Booking",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{public_base_url}}/bookings/{{booking_id}}/confirm",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payment_status\": \"PAID\",\n  \"payment_method\": \"CLICK\",\n  \"payment_processed_at\": \"2026-02-16T12:04:30Z\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Confirms a held booking after payment success.\nResponse includes `vehicle_license_plate` and intentionally omits `queue_id`."
+          },
+          "response": [
+            {
+              "name": "200 OK - Confirmed",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": "{{public_base_url}}/bookings/{{booking_id}}/confirm",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"payment_status\": \"PAID\",\n  \"payment_method\": \"CLICK\",\n  \"payment_processed_at\": \"2026-02-16T12:04:30Z\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "Confirms a held booking after payment success.\nResponse includes `vehicle_license_plate` and intentionally omits `queue_id`."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"booking_id\": \"bkg_01HZ...\",\n  \"booking_status\": \"ACTIVE\",\n  \"payment_status\": \"PAID\",\n  \"payment_method\": \"CLICK\",\n  \"payment_processed_at\": \"2026-02-16T12:04:30Z\",\n  \"vehicle_license_plate\": \"123 TUN 4567\"\n}"
+            }
+          ],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status is 200\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response includes vehicle_license_plate\", function () {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json.vehicle_license_plate).to.be.a(\"string\");",
+                  "  pm.expect(json.vehicle_license_plate.length).to.be.above(0);",
+                  "});",
+                  "",
+                  "pm.test(\"Response does not include queue_id\", function () {",
+                  "  const json = pm.response.json();",
+                  "  pm.expect(json).to.not.have.property(\"queue_id\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cancel Booking",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{public_base_url}}/bookings/{{booking_id}}/cancel",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cancelled_by\": \"CENTRAL\",\n  \"cancellation_reason\": \"PAYMENT_FAILED\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Public Auth Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": "{{public_base_url}}/api/v1/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cin\": \"{{staff_cin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Public Statistics Proxy (ANY Root)",
+          "request": {
+            "method": "ANY",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{public_base_url}}/api/v1/statistics"
+          },
+          "response": []
+        },
+        {
+          "name": "Public Statistics Proxy (ANY Wildcard)",
+          "request": {
+            "method": "ANY",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{public_base_url}}/api/v1/statistics/*path"
+          },
+          "response": []
+        },
+        {
+          "name": "Public Overview Day",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{public_base_url}}/api/v1/public-statistics/overview/day?date={{date}}"
+          },
+          "response": []
+        },
+        {
+          "name": "Public Overview Month",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{public_base_url}}/api/v1/public-statistics/overview/month?year={{year}}&month={{month}}"
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "server_ip",
+      "value": "localhost"
+    },
+    {
+      "key": "auth_base_url",
+      "value": "http://{{server_ip}}:8001"
+    },
+    {
+      "key": "queue_base_url",
+      "value": "http://{{server_ip}}:8002"
+    },
+    {
+      "key": "booking_base_url",
+      "value": "http://{{server_ip}}:8003"
+    },
+    {
+      "key": "websocket_base_url",
+      "value": "http://{{server_ip}}:8004"
+    },
+    {
+      "key": "printer_base_url",
+      "value": "http://{{server_ip}}:8005"
+    },
+    {
+      "key": "statistics_base_url",
+      "value": "http://{{server_ip}}:8006"
+    },
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "staff_cin",
+      "value": "12345678"
+    },
+    {
+      "key": "staff_id",
+      "value": ""
+    },
+    {
+      "key": "staff_target_id",
+      "value": ""
+    },
+    {
+      "key": "route_id",
+      "value": "route_1"
+    },
+    {
+      "key": "vehicle_id",
+      "value": "vehicle_1"
+    },
+    {
+      "key": "auth_id",
+      "value": "auth_1"
+    },
+    {
+      "key": "destination_id",
+      "value": "station_1"
+    },
+    {
+      "key": "destination_id_2",
+      "value": "station_2"
+    },
+    {
+      "key": "queue_entry_id",
+      "value": "queue_1"
+    },
+    {
+      "key": "queue_entry_id_2",
+      "value": "queue_2"
+    },
+    {
+      "key": "booking_id",
+      "value": "booking_1"
+    },
+    {
+      "key": "station_id",
+      "value": "station_1"
+    },
+    {
+      "key": "printer_id",
+      "value": "default"
+    },
+    {
+      "key": "date",
+      "value": "2026-02-15"
+    },
+    {
+      "key": "start_date",
+      "value": "2026-02-01"
+    },
+    {
+      "key": "end_date",
+      "value": "2026-02-15"
+    },
+    {
+      "key": "year",
+      "value": "2026"
+    },
+    {
+      "key": "month",
+      "value": "2"
+    },
+    {
+      "key": "start_rfc3339",
+      "value": "2026-02-15T00:00:00Z"
+    },
+    {
+      "key": "end_rfc3339",
+      "value": "2026-02-15T23:59:59Z"
+    },
+    {
+      "key": "public_base_url",
+      "value": "http://{{server_ip}}:8007"
+    }
+  ]
+}

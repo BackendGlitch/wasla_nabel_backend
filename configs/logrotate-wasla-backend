@@ -1,0 +1,10 @@
+/home/ste/wasla_backend/*.log {
+  daily
+  rotate 14
+  missingok
+  notifempty
+  compress
+  delaycompress
+  copytruncate
+}
+
