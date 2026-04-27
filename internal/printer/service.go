@@ -506,8 +506,11 @@ func defaultLogoCandidates() []string {
 	}
 	paths = append(paths,
 		"./assets/company-logo.png",
+		"./static/assets/company-logo.png",
 		"/app/assets/company-logo.png",
+		"/app/static/assets/company-logo.png",
 		"/opt/wasla_backend/assets/company-logo.png",
+		"/opt/wasla_backend/static/assets/company-logo.png",
 	)
 	return paths
 }

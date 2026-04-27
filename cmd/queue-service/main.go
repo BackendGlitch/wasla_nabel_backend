@@ -57,8 +57,10 @@ func main() {
 	initHandler := queue.NewInitHandler(db.Pool)
 	r.GET("/api/v1/init", initHandler.GetInit)
 
-	// Serve static assets (company logo, etc.)
-	r.Static("/assets", "./static/assets")
+	// Serve static assets (company logo, etc.) from repository assets dir.
+	// NOTE: historically this pointed to ./static/assets, which can become stale
+	// when only ./assets/company-logo.png is updated.
+	r.Static("/assets", "./assets")
 
 	api := r.Group("/api/v1", middleware.AuthRequired())
 	{
