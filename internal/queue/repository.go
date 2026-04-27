@@ -450,7 +450,14 @@ func (r *RepositoryImpl) ListQueue(ctx context.Context, destinationID string, su
                 WHERE dp.is_active = true 
                 AND (now() AT TIME ZONE 'Africa/Tunis') BETWEEN dp.valid_from AND dp.valid_until
             ) dp ON dp.vehicle_id = q.vehicle_id
-            WHERE q.destination_id = $1 AND q.sub_route = $2
+            WHERE q.destination_id IN (
+                SELECT $1
+                UNION
+                SELECT r.id FROM routes r WHERE r.station_id = $1
+                UNION
+                SELECT r.station_id FROM routes r WHERE r.id = $1
+            )
+              AND q.sub_route = $2
             ORDER BY q.queue_position ASC`, destinationID, *subRoute)
 	} else {
 		rows, err = r.db.Query(ctx, `
@@ -492,7 +499,13 @@ func (r *RepositoryImpl) ListQueue(ctx context.Context, destinationID string, su
                 WHERE dp.is_active = true 
                 AND (now() AT TIME ZONE 'Africa/Tunis') BETWEEN dp.valid_from AND dp.valid_until
             ) dp ON dp.vehicle_id = q.vehicle_id
-            WHERE q.destination_id = $1
+            WHERE q.destination_id IN (
+                SELECT $1
+                UNION
+                SELECT r.id FROM routes r WHERE r.station_id = $1
+                UNION
+                SELECT r.station_id FROM routes r WHERE r.id = $1
+            )
             ORDER BY q.queue_position ASC`, destinationID)
 	}
 	if err != nil {
