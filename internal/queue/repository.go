@@ -541,6 +541,9 @@ func (r *RepositoryImpl) AddQueueEntry(ctx context.Context, req AddQueueEntryReq
 	if err := tx.QueryRow(ctx, `SELECT license_plate FROM vehicles WHERE id=$1`, req.VehicleID).Scan(&lp); err != nil {
 		return nil, nil, nil, "", err
 	}
+	if strings.TrimSpace(lp) == "" {
+		return nil, nil, nil, "", fmt.Errorf("vehicle license plate is empty")
+	}
 
 	// Check for existing valid day pass for this vehicle in Africa/Tunis timezone
 	var existingDayPass *DayPassCreatedEvent
@@ -628,18 +631,18 @@ func (r *RepositoryImpl) AddQueueEntry(ctx context.Context, req AddQueueEntryReq
 	}
 
 	row := tx.QueryRow(ctx, `
-        INSERT INTO vehicle_queue (id, vehicle_id, destination_id, destination_name, sub_route, sub_route_name,
+        INSERT INTO vehicle_queue (id, vehicle_id, license_plate, destination_id, destination_name, sub_route, sub_route_name,
             queue_type, queue_position, status, entered_at, available_seats, total_seats, base_price)
-        SELECT gen_random_uuid(), $1, $2, $3, $4, $5,
-               COALESCE($6,'REGULAR'), $7, 'WAITING', now(), v.available_seats, v.total_seats, 
+        SELECT gen_random_uuid(), $1, $2, $3, $4, $5, $6,
+               COALESCE($7,'REGULAR'), $8, 'WAITING', now(), v.available_seats, v.total_seats, 
                COALESCE(r.base_price, v.base_price)
         FROM vehicles v 
-        LEFT JOIN routes r ON r.station_id = $2
+        LEFT JOIN routes r ON r.station_id = $3
         WHERE v.id = $1
         RETURNING id, vehicle_id, destination_id, destination_name, sub_route, sub_route_name,
                queue_type, queue_position, status, entered_at,
                available_seats, total_seats, base_price, estimated_departure, actual_departure`,
-		req.VehicleID, req.DestinationID, req.DestinationName, req.SubRoute, req.SubRouteName, req.QueueType, nextPos)
+		req.VehicleID, lp, req.DestinationID, req.DestinationName, req.SubRoute, req.SubRouteName, req.QueueType, nextPos)
 
 	var e QueueEntry
 	if err := row.Scan(&e.ID, &e.VehicleID, &e.DestinationID, &e.DestinationName, &e.SubRoute, &e.SubRouteName,
