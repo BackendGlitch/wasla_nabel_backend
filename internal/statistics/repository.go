@@ -141,7 +141,7 @@ func (r *RepositoryImpl) getStaffDailyIncomeFallback(ctx context.Context, staffI
 				COALESCE(SUM(price), 0.00) as total_day_pass_income,
 				COUNT(*)::int as total_transactions
 			FROM day_passes
-			WHERE DATE(created_at) = $2
+			WHERE DATE(purchase_date) = $2
 				AND created_by IS NOT NULL
 			GROUP BY created_by::text
 		) daypass_stats ON daypass_stats.staff_id = s.id::text
@@ -377,7 +377,7 @@ func (r *RepositoryImpl) GetAllStaffIncomeForDate(ctx context.Context, date time
 				COUNT(*) as total_day_passes_sold,
 				COUNT(*) as total_transactions
 			FROM day_passes 
-			WHERE DATE(created_at) = $1 
+			WHERE DATE(purchase_date) = $1 
 				AND created_by IS NOT NULL
 			GROUP BY created_by
 		) daypass_stats ON s.id = daypass_stats.staff_id
@@ -588,7 +588,7 @@ func (r *RepositoryImpl) GetActualIncomeForDate(ctx context.Context, date time.T
 		day_passes_today AS (
 			SELECT COUNT(*) as count
 			FROM day_passes
-			WHERE DATE(created_at) = $1
+			WHERE DATE(purchase_date) = $1
 		)
 		SELECT 
 			COALESCE(SUM(seats_booked), 0) as seats_booked,
@@ -637,8 +637,8 @@ func (r *RepositoryImpl) GetActualIncomeForPeriod(ctx context.Context, startTime
 		day_passes_period AS (
 			SELECT COUNT(*) as count
 			FROM day_passes
-			WHERE created_at >= $1::timestamp
-				AND created_at <= $2::timestamp
+			WHERE purchase_date >= $1::timestamp
+				AND purchase_date <= $2::timestamp
 		)
 		SELECT 
 			COALESCE(SUM(seats_booked), 0) as seats_booked,
@@ -687,8 +687,8 @@ func (r *RepositoryImpl) GetActualIncomeForMonth(ctx context.Context, year, mont
 		day_passes_month AS (
 			SELECT COUNT(*) as count
 			FROM day_passes
-			WHERE EXTRACT(YEAR FROM created_at) = $1
-				AND EXTRACT(MONTH FROM created_at) = $2
+			WHERE EXTRACT(YEAR FROM purchase_date) = $1
+				AND EXTRACT(MONTH FROM purchase_date) = $2
 		)
 		SELECT 
 			COALESCE(SUM(seats_booked), 0) as seats_booked,
@@ -750,8 +750,8 @@ func (r *RepositoryImpl) GetAllStaffIncomeForMonth(ctx context.Context, year, mo
 				COUNT(*) as total_day_passes_sold,
 				COUNT(*) as total_transactions
 			FROM day_passes 
-			WHERE EXTRACT(YEAR FROM created_at) = $1 
-				AND EXTRACT(MONTH FROM created_at) = $2
+			WHERE EXTRACT(YEAR FROM purchase_date) = $1 
+				AND EXTRACT(MONTH FROM purchase_date) = $2
 				AND created_by IS NOT NULL
 			GROUP BY created_by
 		) daypass_stats ON s.id = daypass_stats.staff_id

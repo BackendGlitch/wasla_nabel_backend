@@ -302,15 +302,18 @@ func (r *RepositoryImpl) DeleteVehicle(ctx context.Context, id string) error {
 	// Delete operational data first
 	// Historical records (trips, exit_passes, day_passes) will have vehicle_id set to NULL automatically
 	// via ON DELETE SET NULL foreign key constraints
-
-	// Delete vehicle schedules
-	_, err := r.db.Exec(ctx, `DELETE FROM vehicle_schedules WHERE vehicle_id = $1`, id)
-	if err != nil {
-		return fmt.Errorf("failed to delete vehicle schedules: %w", err)
+	var vehicleSchedulesExists bool
+	if err := r.db.QueryRow(ctx, `SELECT to_regclass('public.vehicle_schedules') IS NOT NULL`).Scan(&vehicleSchedulesExists); err != nil {
+		return fmt.Errorf("failed to check vehicle schedules table: %w", err)
+	}
+	if vehicleSchedulesExists {
+		if _, err := r.db.Exec(ctx, `DELETE FROM vehicle_schedules WHERE vehicle_id = $1`, id); err != nil {
+			return fmt.Errorf("failed to delete vehicle schedules: %w", err)
+		}
 	}
 
 	// Delete authorized stations
-	_, err = r.db.Exec(ctx, `DELETE FROM vehicle_authorized_stations WHERE vehicle_id = $1`, id)
+	_, err := r.db.Exec(ctx, `DELETE FROM vehicle_authorized_stations WHERE vehicle_id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("failed to delete authorized stations: %w", err)
 	}
