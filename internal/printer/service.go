@@ -614,7 +614,8 @@ func defaultLogoEscPos() ([]byte, error) {
 			if p == "" {
 				continue
 			}
-			data, err := pngFileToEscPosRaster(p, 256)
+			// Use a larger logo width for 58mm printers while keeping safe margins.
+			data, err := pngFileToEscPosRaster(p, 320)
 			if err == nil {
 				defaultLogoData = data
 				return
@@ -1004,7 +1005,7 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 			setAlign(0x01)
 			path := resolveLogoPath(raw)
 			if path != "" {
-				if logoData, err := pngFileToEscPosRaster(path, 256); err == nil && len(logoData) > 0 {
+				if logoData, err := pngFileToEscPosRaster(path, 320); err == nil && len(logoData) > 0 {
 					buffer.Write(logoData)
 					buffer.WriteByte(0x0A)
 				}
