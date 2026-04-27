@@ -3,6 +3,6 @@ ALTER TABLE station_config ADD COLUMN IF NOT EXISTS company_name TEXT NOT NULL D
 ALTER TABLE station_config ADD COLUMN IF NOT EXISTS company_logo_url TEXT NOT NULL DEFAULT '';
 
 UPDATE station_config
-SET company_name = 'STE Dhraiff Services Transport',
+SET company_name = 'FATMA ZAHRA Services Transport',
     company_logo_url = '/assets/company-logo.png'
 WHERE company_name = '';

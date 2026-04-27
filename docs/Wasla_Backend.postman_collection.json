@@ -1273,7 +1273,7 @@
             "url": "{{printer_base_url}}/api/printer/print/booking",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"licensePlate\": \"123 TUN 4567\",\n  \"destinationName\": \"Tunis\",\n  \"seatNumber\": 1,\n  \"totalAmount\": 5.15,\n  \"createdBy\": \"{{staff_id}}\",\n  \"createdAt\": \"2026-02-15T10:30:00Z\",\n  \"stationName\": \"Main Station\",\n  \"routeName\": \"Tunis Route\",\n  \"vehicleCapacity\": 8,\n  \"basePrice\": 5,\n  \"exitPassCount\": 1,\n  \"companyName\": \"STE DHRAIFF SERVICES TRANSPORT\",\n  \"companyLogo\": \"\",\n  \"staffFirstName\": \"Ali\",\n  \"staffLastName\": \"Ben Salah\",\n  \"printerConfig\": {\n    \"ip\": \"192.168.1.50\",\n    \"port\": 9100\n  }\n}",
+              "raw": "{\n  \"licensePlate\": \"123 TUN 4567\",\n  \"destinationName\": \"Tunis\",\n  \"seatNumber\": 1,\n  \"totalAmount\": 5.15,\n  \"createdBy\": \"{{staff_id}}\",\n  \"createdAt\": \"2026-02-15T10:30:00Z\",\n  \"stationName\": \"Main Station\",\n  \"routeName\": \"Tunis Route\",\n  \"vehicleCapacity\": 8,\n  \"basePrice\": 5,\n  \"exitPassCount\": 1,\n  \"companyName\": \"FATMA ZAHRA Services Transport\",\n  \"companyLogo\": \"\",\n  \"staffFirstName\": \"Ali\",\n  \"staffLastName\": \"Ben Salah\",\n  \"printerConfig\": {\n    \"ip\": \"192.168.1.50\",\n    \"port\": 9100\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1297,7 +1297,7 @@
             "url": "{{printer_base_url}}/api/printer/print/entry",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"licensePlate\": \"123 TUN 4567\",\n  \"destinationName\": \"Tunis\",\n  \"seatNumber\": 1,\n  \"totalAmount\": 5.15,\n  \"createdBy\": \"{{staff_id}}\",\n  \"createdAt\": \"2026-02-15T10:30:00Z\",\n  \"stationName\": \"Main Station\",\n  \"routeName\": \"Tunis Route\",\n  \"vehicleCapacity\": 8,\n  \"basePrice\": 5,\n  \"exitPassCount\": 1,\n  \"companyName\": \"STE DHRAIFF SERVICES TRANSPORT\",\n  \"companyLogo\": \"\",\n  \"staffFirstName\": \"Ali\",\n  \"staffLastName\": \"Ben Salah\",\n  \"printerConfig\": {\n    \"ip\": \"192.168.1.50\",\n    \"port\": 9100\n  }\n}",
+              "raw": "{\n  \"licensePlate\": \"123 TUN 4567\",\n  \"destinationName\": \"Tunis\",\n  \"seatNumber\": 1,\n  \"totalAmount\": 5.15,\n  \"createdBy\": \"{{staff_id}}\",\n  \"createdAt\": \"2026-02-15T10:30:00Z\",\n  \"stationName\": \"Main Station\",\n  \"routeName\": \"Tunis Route\",\n  \"vehicleCapacity\": 8,\n  \"basePrice\": 5,\n  \"exitPassCount\": 1,\n  \"companyName\": \"FATMA ZAHRA Services Transport\",\n  \"companyLogo\": \"\",\n  \"staffFirstName\": \"Ali\",\n  \"staffLastName\": \"Ben Salah\",\n  \"printerConfig\": {\n    \"ip\": \"192.168.1.50\",\n    \"port\": 9100\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1321,7 +1321,7 @@
             "url": "{{printer_base_url}}/api/printer/print/exit",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"licensePlate\": \"123 TUN 4567\",\n  \"destinationName\": \"Tunis\",\n  \"seatNumber\": 1,\n  \"totalAmount\": 5.15,\n  \"createdBy\": \"{{staff_id}}\",\n  \"createdAt\": \"2026-02-15T10:30:00Z\",\n  \"stationName\": \"Main Station\",\n  \"routeName\": \"Tunis Route\",\n  \"vehicleCapacity\": 8,\n  \"basePrice\": 5,\n  \"exitPassCount\": 1,\n  \"companyName\": \"STE DHRAIFF SERVICES TRANSPORT\",\n  \"companyLogo\": \"\",\n  \"staffFirstName\": \"Ali\",\n  \"staffLastName\": \"Ben Salah\",\n  \"printerConfig\": {\n    \"ip\": \"192.168.1.50\",\n    \"port\": 9100\n  }\n}",
+              "raw": "{\n  \"licensePlate\": \"123 TUN 4567\",\n  \"destinationName\": \"Tunis\",\n  \"seatNumber\": 1,\n  \"totalAmount\": 5.15,\n  \"createdBy\": \"{{staff_id}}\",\n  \"createdAt\": \"2026-02-15T10:30:00Z\",\n  \"stationName\": \"Main Station\",\n  \"routeName\": \"Tunis Route\",\n  \"vehicleCapacity\": 8,\n  \"basePrice\": 5,\n  \"exitPassCount\": 1,\n  \"companyName\": \"FATMA ZAHRA Services Transport\",\n  \"companyLogo\": \"\",\n  \"staffFirstName\": \"Ali\",\n  \"staffLastName\": \"Ben Salah\",\n  \"printerConfig\": {\n    \"ip\": \"192.168.1.50\",\n    \"port\": 9100\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1345,7 +1345,7 @@
             "url": "{{printer_base_url}}/api/printer/print/daypass",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"licensePlate\": \"123 TUN 4567\",\n  \"destinationName\": \"Tunis\",\n  \"seatNumber\": 1,\n  \"totalAmount\": 5.15,\n  \"createdBy\": \"{{staff_id}}\",\n  \"createdAt\": \"2026-02-15T10:30:00Z\",\n  \"stationName\": \"Main Station\",\n  \"routeName\": \"Tunis Route\",\n  \"vehicleCapacity\": 8,\n  \"basePrice\": 5,\n  \"exitPassCount\": 1,\n  \"companyName\": \"STE DHRAIFF SERVICES TRANSPORT\",\n  \"companyLogo\": \"\",\n  \"staffFirstName\": \"Ali\",\n  \"staffLastName\": \"Ben Salah\",\n  \"printerConfig\": {\n    \"ip\": \"192.168.1.50\",\n    \"port\": 9100\n  }\n}",
+              "raw": "{\n  \"licensePlate\": \"123 TUN 4567\",\n  \"destinationName\": \"Tunis\",\n  \"seatNumber\": 1,\n  \"totalAmount\": 5.15,\n  \"createdBy\": \"{{staff_id}}\",\n  \"createdAt\": \"2026-02-15T10:30:00Z\",\n  \"stationName\": \"Main Station\",\n  \"routeName\": \"Tunis Route\",\n  \"vehicleCapacity\": 8,\n  \"basePrice\": 5,\n  \"exitPassCount\": 1,\n  \"companyName\": \"FATMA ZAHRA Services Transport\",\n  \"companyLogo\": \"\",\n  \"staffFirstName\": \"Ali\",\n  \"staffLastName\": \"Ben Salah\",\n  \"printerConfig\": {\n    \"ip\": \"192.168.1.50\",\n    \"port\": 9100\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1369,7 +1369,7 @@
             "url": "{{printer_base_url}}/api/printer/print/exitpass",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"licensePlate\": \"123 TUN 4567\",\n  \"destinationName\": \"Tunis\",\n  \"seatNumber\": 1,\n  \"totalAmount\": 5.15,\n  \"createdBy\": \"{{staff_id}}\",\n  \"createdAt\": \"2026-02-15T10:30:00Z\",\n  \"stationName\": \"Main Station\",\n  \"routeName\": \"Tunis Route\",\n  \"vehicleCapacity\": 8,\n  \"basePrice\": 5,\n  \"exitPassCount\": 1,\n  \"companyName\": \"STE DHRAIFF SERVICES TRANSPORT\",\n  \"companyLogo\": \"\",\n  \"staffFirstName\": \"Ali\",\n  \"staffLastName\": \"Ben Salah\",\n  \"printerConfig\": {\n    \"ip\": \"192.168.1.50\",\n    \"port\": 9100\n  }\n}",
+              "raw": "{\n  \"licensePlate\": \"123 TUN 4567\",\n  \"destinationName\": \"Tunis\",\n  \"seatNumber\": 1,\n  \"totalAmount\": 5.15,\n  \"createdBy\": \"{{staff_id}}\",\n  \"createdAt\": \"2026-02-15T10:30:00Z\",\n  \"stationName\": \"Main Station\",\n  \"routeName\": \"Tunis Route\",\n  \"vehicleCapacity\": 8,\n  \"basePrice\": 5,\n  \"exitPassCount\": 1,\n  \"companyName\": \"FATMA ZAHRA Services Transport\",\n  \"companyLogo\": \"\",\n  \"staffFirstName\": \"Ali\",\n  \"staffLastName\": \"Ben Salah\",\n  \"printerConfig\": {\n    \"ip\": \"192.168.1.50\",\n    \"port\": 9100\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1393,7 +1393,7 @@
             "url": "{{printer_base_url}}/api/printer/print/exitpass-and-remove",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"queueEntryId\": \"{{queue_entry_id}}\",\n  \"licensePlate\": \"123 TUN 4567\",\n  \"destinationName\": \"Tunis\",\n  \"bookedSeats\": 3,\n  \"totalSeats\": 8,\n  \"basePrice\": 5,\n  \"createdBy\": \"{{staff_id}}\",\n  \"stationName\": \"Main Station\",\n  \"routeName\": \"Tunis Route\",\n  \"exitPassCount\": 10,\n  \"companyName\": \"STE DHRAIFF SERVICES TRANSPORT\",\n  \"companyLogo\": \"\",\n  \"staffFirstName\": \"Ali\",\n  \"staffLastName\": \"Ben Salah\",\n  \"printerConfig\": {\n    \"ip\": \"192.168.1.50\",\n    \"port\": 9100\n  }\n}",
+              "raw": "{\n  \"queueEntryId\": \"{{queue_entry_id}}\",\n  \"licensePlate\": \"123 TUN 4567\",\n  \"destinationName\": \"Tunis\",\n  \"bookedSeats\": 3,\n  \"totalSeats\": 8,\n  \"basePrice\": 5,\n  \"createdBy\": \"{{staff_id}}\",\n  \"stationName\": \"Main Station\",\n  \"routeName\": \"Tunis Route\",\n  \"exitPassCount\": 10,\n  \"companyName\": \"FATMA ZAHRA Services Transport\",\n  \"companyLogo\": \"\",\n  \"staffFirstName\": \"Ali\",\n  \"staffLastName\": \"Ben Salah\",\n  \"printerConfig\": {\n    \"ip\": \"192.168.1.50\",\n    \"port\": 9100\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1417,7 +1417,7 @@
             "url": "{{printer_base_url}}/api/printer/print/talon",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"licensePlate\": \"123 TUN 4567\",\n  \"destinationName\": \"Tunis\",\n  \"seatNumber\": 1,\n  \"totalAmount\": 5.15,\n  \"createdBy\": \"{{staff_id}}\",\n  \"createdAt\": \"2026-02-15T10:30:00Z\",\n  \"stationName\": \"Main Station\",\n  \"routeName\": \"Tunis Route\",\n  \"vehicleCapacity\": 8,\n  \"basePrice\": 5,\n  \"exitPassCount\": 1,\n  \"companyName\": \"STE DHRAIFF SERVICES TRANSPORT\",\n  \"companyLogo\": \"\",\n  \"staffFirstName\": \"Ali\",\n  \"staffLastName\": \"Ben Salah\",\n  \"printerConfig\": {\n    \"ip\": \"192.168.1.50\",\n    \"port\": 9100\n  }\n}",
+              "raw": "{\n  \"licensePlate\": \"123 TUN 4567\",\n  \"destinationName\": \"Tunis\",\n  \"seatNumber\": 1,\n  \"totalAmount\": 5.15,\n  \"createdBy\": \"{{staff_id}}\",\n  \"createdAt\": \"2026-02-15T10:30:00Z\",\n  \"stationName\": \"Main Station\",\n  \"routeName\": \"Tunis Route\",\n  \"vehicleCapacity\": 8,\n  \"basePrice\": 5,\n  \"exitPassCount\": 1,\n  \"companyName\": \"FATMA ZAHRA Services Transport\",\n  \"companyLogo\": \"\",\n  \"staffFirstName\": \"Ali\",\n  \"staffLastName\": \"Ben Salah\",\n  \"printerConfig\": {\n    \"ip\": \"192.168.1.50\",\n    \"port\": 9100\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"

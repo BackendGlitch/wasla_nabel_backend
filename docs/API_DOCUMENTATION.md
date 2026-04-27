@@ -262,7 +262,7 @@ Note: `queue_id` is intentionally not returned by the confirm endpoint.
   "vehicleCapacity": 8,
   "basePrice": 5.0,
   "exitPassCount": 2,
-  "companyName": "STE DHRAIFF SERVICES TRANSPORT",
+  "companyName": "FATMA ZAHRA Services Transport",
   "companyLogo": "",
   "staffFirstName": "Ali",
   "staffLastName": "Ben Salah",

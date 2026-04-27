@@ -478,7 +478,7 @@ func (s *Service) generateBookingTicketContent(data *TicketData) string {
 	// Compact header with company name
 	if data.CompanyName != "" {
 		content.WriteString("================================\n")
-		content.WriteString(fmt.Sprintf("  %s\n", strings.ToUpper("STE DHRAIFF SERVICES TRANSPORT")))
+		content.WriteString(fmt.Sprintf("  %s\n", strings.ToUpper("FATMA ZAHRA Services Transport")))
 		content.WriteString("================================\n")
 	}
 
@@ -529,7 +529,7 @@ func (s *Service) generateEntryTicketContent(data *TicketData) string {
 	// Compact header with company name
 	if data.CompanyName != "" {
 		content.WriteString("================================\n")
-		content.WriteString(fmt.Sprintf("  %s\n", strings.ToUpper("STE DHRAIFF SERVICES TRANSPORT")))
+		content.WriteString(fmt.Sprintf("  %s\n", strings.ToUpper("FATMA ZAHRA Services Transport")))
 		content.WriteString("================================\n")
 	}
 
@@ -557,7 +557,7 @@ func (s *Service) generateExitTicketContent(data *TicketData) string {
 	// Compact header with company name
 	if data.CompanyName != "" {
 		content.WriteString("================================\n")
-		content.WriteString(fmt.Sprintf("  %s\n", strings.ToUpper("STE DHRAIFF SERVICES TRANSPORT")))
+		content.WriteString(fmt.Sprintf("  %s\n", strings.ToUpper("FATMA ZAHRA Services Transport")))
 		content.WriteString("================================\n")
 	}
 
@@ -586,7 +586,7 @@ func (s *Service) generateDayPassTicketContent(data *TicketData) string {
 	// Compact header with company name
 	if data.CompanyName != "" {
 		content.WriteString("================================\n")
-		content.WriteString(fmt.Sprintf("  %s\n", strings.ToUpper("STE DHRAIFF SERVICES TRANSPORT")))
+		content.WriteString(fmt.Sprintf("  %s\n", strings.ToUpper("FATMA ZAHRA Services Transport")))
 		content.WriteString("================================\n")
 	}
 
@@ -641,7 +641,7 @@ func (s *Service) generateExitPassTicketContent(data *TicketData) string {
 	// Compact header with company name
 	if data.CompanyName != "" {
 		content.WriteString("================================\n")
-		content.WriteString(fmt.Sprintf("  %s\n", strings.ToUpper("STE DHRAIFF SERVICES TRANSPORT")))
+		content.WriteString(fmt.Sprintf("  %s\n", strings.ToUpper("FATMA ZAHRA Services Transport")))
 		content.WriteString("================================\n")
 	}
 
@@ -714,7 +714,7 @@ func (s *Service) generateTalonContent(data *TicketData) string {
 	var content strings.Builder
 
 	content.WriteString("================================\n")
-	content.WriteString(fmt.Sprintf("  %s\n", strings.ToUpper("STE DHRAIFF SERVICES TRANSPORT")))
+	content.WriteString(fmt.Sprintf("  %s\n", strings.ToUpper("FATMA ZAHRA Services Transport")))
 	content.WriteString("================================\n")
 	content.WriteString(fmt.Sprintf("Vehicule: %s\n", data.LicensePlate))
 	if data.DestinationName != "" {
@@ -754,7 +754,7 @@ func (s *Service) generateStandardTicketContent(data *TicketData) string {
 	// Compact header with company name
 	if data.CompanyName != "" {
 		content.WriteString("================================\n")
-		content.WriteString(fmt.Sprintf("  %s\n", strings.ToUpper("STE DHRAIFF SERVICES TRANSPORT")))
+		content.WriteString(fmt.Sprintf("  %s\n", strings.ToUpper("FATMA ZAHRA Services Transport")))
 		content.WriteString("================================\n")
 	}
 
