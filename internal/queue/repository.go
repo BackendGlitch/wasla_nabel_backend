@@ -442,9 +442,9 @@ func (r *RepositoryImpl) ListQueue(ctx context.Context, destinationID string, su
                     true as has_pass,
                     dp.purchase_date,
                     EXISTS(
-                        SELECT 1 FROM trips t 
-                        WHERE t.vehicle_id = dp.vehicle_id 
-                        AND t.start_time::date = CURRENT_DATE
+                        SELECT 1 FROM trips t
+                        WHERE COALESCE(to_jsonb(t)->>'vehicle_id', '') = dp.vehicle_id
+                          AND t.start_time::date = CURRENT_DATE
                     ) as has_trips_today
                 FROM day_passes dp
                 WHERE dp.is_active = true 
@@ -491,9 +491,9 @@ func (r *RepositoryImpl) ListQueue(ctx context.Context, destinationID string, su
                     true as has_pass,
                     dp.purchase_date,
                     EXISTS(
-                        SELECT 1 FROM trips t 
-                        WHERE t.vehicle_id = dp.vehicle_id 
-                        AND t.start_time::date = CURRENT_DATE
+                        SELECT 1 FROM trips t
+                        WHERE COALESCE(to_jsonb(t)->>'vehicle_id', '') = dp.vehicle_id
+                          AND t.start_time::date = CURRENT_DATE
                     ) as has_trips_today
                 FROM day_passes dp
                 WHERE dp.is_active = true 
