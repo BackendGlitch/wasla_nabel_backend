@@ -412,7 +412,7 @@ func (r *RepositoryImpl) ListQueue(ctx context.Context, destinationID string, su
 	var err error
 	if subRoute != nil && *subRoute != "" {
 		rows, err = r.db.Query(ctx, `
-            SELECT q.id, q.vehicle_id, v.license_plate, q.destination_id, q.destination_name,
+            SELECT q.id, q.vehicle_id, COALESCE(NULLIF(v.license_plate, ''), q.license_plate), q.destination_id, q.destination_name,
                    q.sub_route, q.sub_route_name, q.queue_type, q.queue_position,
                    CASE
                      WHEN q.available_seats = 0 THEN 'READY'
@@ -435,7 +435,7 @@ func (r *RepositoryImpl) ListQueue(ctx context.Context, destinationID string, su
                    dp.purchase_date as day_pass_purchased_at,
                    COALESCE(dp.has_trips_today, false) as has_trips_today
             FROM vehicle_queue q
-            JOIN vehicles v ON v.id = q.vehicle_id
+            LEFT JOIN vehicles v ON v.id = q.vehicle_id
             LEFT JOIN (
                 SELECT 
                     dp.vehicle_id,
@@ -454,7 +454,7 @@ func (r *RepositoryImpl) ListQueue(ctx context.Context, destinationID string, su
             ORDER BY q.queue_position ASC`, destinationID, *subRoute)
 	} else {
 		rows, err = r.db.Query(ctx, `
-            SELECT q.id, q.vehicle_id, v.license_plate, q.destination_id, q.destination_name,
+            SELECT q.id, q.vehicle_id, COALESCE(NULLIF(v.license_plate, ''), q.license_plate), q.destination_id, q.destination_name,
                    q.sub_route, q.sub_route_name, q.queue_type, q.queue_position,
                    CASE
                      WHEN q.available_seats = 0 THEN 'READY'
@@ -477,7 +477,7 @@ func (r *RepositoryImpl) ListQueue(ctx context.Context, destinationID string, su
                    dp.purchase_date as day_pass_purchased_at,
                    COALESCE(dp.has_trips_today, false) as has_trips_today
             FROM vehicle_queue q
-            JOIN vehicles v ON v.id = q.vehicle_id
+            LEFT JOIN vehicles v ON v.id = q.vehicle_id
             LEFT JOIN (
                 SELECT 
                     dp.vehicle_id,
@@ -728,11 +728,11 @@ func (r *RepositoryImpl) UpdateQueueEntry(ctx context.Context, id string, req Up
 	}
 
 	row := r.db.QueryRow(ctx, `
-        SELECT q.id, q.vehicle_id, v.license_plate, q.destination_id, q.destination_name,
+        SELECT q.id, q.vehicle_id, COALESCE(NULLIF(v.license_plate, ''), q.license_plate), q.destination_id, q.destination_name,
                q.sub_route, q.sub_route_name, q.queue_type, q.queue_position, q.status,
                q.entered_at, q.available_seats, q.total_seats, q.base_price,
                q.estimated_departure, q.actual_departure
-        FROM vehicle_queue q JOIN vehicles v ON v.id=q.vehicle_id
+        FROM vehicle_queue q LEFT JOIN vehicles v ON v.id=q.vehicle_id
         WHERE q.id=$1`, id)
 	var e QueueEntry
 	if err := row.Scan(&e.ID, &e.VehicleID, &e.LicensePlate, &e.DestinationID, &e.DestinationName,
