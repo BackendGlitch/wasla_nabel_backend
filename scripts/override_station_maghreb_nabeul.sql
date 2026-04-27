@@ -119,8 +119,8 @@ INSERT INTO station_config (
   '23:00',
   true,
   0,
-  'Societe Regionale Privee Fatma Ezzahra de Services de Transport a Nabeul',
-  '',
+  'FATMA ZAHRA Services Transport',
+  '/assets/company-logo.png',
   NOW(),
   NOW()
 );

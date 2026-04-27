@@ -229,8 +229,8 @@ INSERT INTO station_config (
   '23:00',
   true,
   0,
-  'Test Company',
-  ''
+  'FATMA ZAHRA Services Transport',
+  '/assets/company-logo.png'
 );
 
 INSERT INTO routes (

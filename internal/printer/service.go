@@ -6,12 +6,24 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image/png"
 	"math"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"station-backend/internal/pricing"
+)
+
+const defaultCompanyName = "FATMA ZAHRA Services Transport"
+
+var (
+	defaultLogoOnce sync.Once
+	defaultLogoData []byte
+	defaultLogoErr  error
 )
 
 // ClientPrinterPrefix marks print_jobs.printer_id rows that are delivered to
@@ -471,16 +483,164 @@ func agentLineForTicket(d *TicketData) string {
 	return "Agent"
 }
 
+func companyNameForTicket(data *TicketData) string {
+	name := strings.TrimSpace(data.CompanyName)
+	if name == "" {
+		return defaultCompanyName
+	}
+	return name
+}
+
+func logoMarkerForTicket(data *TicketData) string {
+	logo := strings.TrimSpace(data.CompanyLogo)
+	if logo != "" {
+		return fmt.Sprintf("{{LOGO_PATH:%s}}", logo)
+	}
+	return "{{COMPANY_LOGO}}"
+}
+
+func defaultLogoCandidates() []string {
+	paths := []string{}
+	if env := strings.TrimSpace(os.Getenv("WASLA_COMPANY_LOGO_PATH")); env != "" {
+		paths = append(paths, env)
+	}
+	paths = append(paths,
+		"./assets/company-logo.png",
+		"/app/assets/company-logo.png",
+		"/opt/wasla_backend/assets/company-logo.png",
+	)
+	return paths
+}
+
+func resolveLogoPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+		return ""
+	}
+	if filepath.IsAbs(path) {
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+		if strings.HasPrefix(path, "/assets/") {
+			if _, err := os.Stat("." + path); err == nil {
+				return "." + path
+			}
+		}
+		return ""
+	}
+	if _, err := os.Stat(path); err == nil {
+		return path
+	}
+	return ""
+}
+
+func pngFileToEscPosRaster(path string, maxWidth int) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	img, err := png.Decode(f)
+	if err != nil {
+		return nil, err
+	}
+
+	b := img.Bounds()
+	srcW := b.Dx()
+	srcH := b.Dy()
+	if srcW <= 0 || srcH <= 0 {
+		return nil, fmt.Errorf("invalid logo dimensions")
+	}
+
+	if maxWidth <= 0 {
+		maxWidth = 256
+	}
+	dstW := srcW
+	if dstW > maxWidth {
+		dstW = maxWidth
+	}
+	dstH := srcH * dstW / srcW
+	if dstH <= 0 {
+		dstH = 1
+	}
+
+	bytesPerRow := (dstW + 7) / 8
+	raster := make([]byte, bytesPerRow*dstH)
+	threshold := uint32(180)
+
+	for y := 0; y < dstH; y++ {
+		srcY := b.Min.Y + (y*srcH)/dstH
+		for x := 0; x < dstW; x++ {
+			srcX := b.Min.X + (x*srcW)/dstW
+			r, g, bb, a := img.At(srcX, srcY).RGBA()
+			if a == 0 {
+				continue
+			}
+			// Convert to luminance in [0,255] scale.
+			luma := ((299*r + 587*g + 114*bb) / 1000) >> 8
+			if luma < threshold {
+				idx := y*bytesPerRow + (x / 8)
+				raster[idx] |= 0x80 >> uint(x%8)
+			}
+		}
+	}
+
+	var out bytes.Buffer
+	// GS v 0 m xL xH yL yH d1...dk
+	out.Write([]byte{
+		0x1D, 0x76, 0x30, 0x00,
+		byte(bytesPerRow & 0xFF), byte((bytesPerRow >> 8) & 0xFF),
+		byte(dstH & 0xFF), byte((dstH >> 8) & 0xFF),
+	})
+	out.Write(raster)
+	out.WriteByte(0x0A)
+	return out.Bytes(), nil
+}
+
+func defaultLogoEscPos() ([]byte, error) {
+	defaultLogoOnce.Do(func() {
+		for _, candidate := range defaultLogoCandidates() {
+			p := resolveLogoPath(candidate)
+			if p == "" {
+				continue
+			}
+			data, err := pngFileToEscPosRaster(p, 256)
+			if err == nil {
+				defaultLogoData = data
+				return
+			}
+		}
+		defaultLogoErr = fmt.Errorf("default logo not found")
+	})
+	return defaultLogoData, defaultLogoErr
+}
+
+// resolveServiceFeePerSeat picks the most reliable per-seat service fee:
+// explicit payload -> total-base (single-seat tickets) -> global fallback.
+func resolveServiceFeePerSeat(data *TicketData) float64 {
+	if data.ServiceFee > 0 {
+		return data.ServiceFee
+	}
+	if data.BasePrice > 0 && data.TotalAmount > 0 {
+		fee := data.TotalAmount - data.BasePrice
+		if fee >= 0 && fee < 1 {
+			return fee
+		}
+	}
+	return pricing.ServiceFeePerSeatTND
+}
+
 // Generate ticket content methods
 func (s *Service) generateBookingTicketContent(data *TicketData) string {
 	var content strings.Builder
 
-	// Compact header with company name
-	if data.CompanyName != "" {
-		content.WriteString("================================\n")
-		content.WriteString(fmt.Sprintf("  %s\n", strings.ToUpper("FATMA ZAHRA Services Transport")))
-		content.WriteString("================================\n")
-	}
+	content.WriteString(logoMarkerForTicket(data) + "\n")
+	content.WriteString(fmt.Sprintf("{{CENTER_SMALL:%s}}\n", strings.ToUpper(companyNameForTicket(data))))
+	content.WriteString("================================\n")
 
 	// Compact ticket title
 	content.WriteString("     BILLET DE RÉSERVATION\n")
@@ -494,9 +654,9 @@ func (s *Service) generateBookingTicketContent(data *TicketData) string {
 	// Detailed pricing breakdown
 	if data.BasePrice > 0 {
 		// SeatNumber is an index label, not a quantity; pricing is for one ticket here.
-		fee := pricing.ServiceFeePerSeatTND
+		fee := resolveServiceFeePerSeat(data)
 		baseLine := data.BasePrice
-		if data.TotalAmount > 0 {
+		if data.TotalAmount > 0 && data.BasePrice <= 0 {
 			baseLine = data.TotalAmount - fee
 			if baseLine < 0 {
 				baseLine = 0
@@ -526,12 +686,9 @@ func (s *Service) generateBookingTicketContent(data *TicketData) string {
 func (s *Service) generateEntryTicketContent(data *TicketData) string {
 	var content strings.Builder
 
-	// Compact header with company name
-	if data.CompanyName != "" {
-		content.WriteString("================================\n")
-		content.WriteString(fmt.Sprintf("  %s\n", strings.ToUpper("FATMA ZAHRA Services Transport")))
-		content.WriteString("================================\n")
-	}
+	content.WriteString(logoMarkerForTicket(data) + "\n")
+	content.WriteString(fmt.Sprintf("{{CENTER_SMALL:%s}}\n", strings.ToUpper(companyNameForTicket(data))))
+	content.WriteString("================================\n")
 
 	// Compact ticket title
 	content.WriteString("        BILLET D'ENTRÉE\n")
@@ -554,12 +711,9 @@ func (s *Service) generateEntryTicketContent(data *TicketData) string {
 func (s *Service) generateExitTicketContent(data *TicketData) string {
 	var content strings.Builder
 
-	// Compact header with company name
-	if data.CompanyName != "" {
-		content.WriteString("================================\n")
-		content.WriteString(fmt.Sprintf("  %s\n", strings.ToUpper("FATMA ZAHRA Services Transport")))
-		content.WriteString("================================\n")
-	}
+	content.WriteString(logoMarkerForTicket(data) + "\n")
+	content.WriteString(fmt.Sprintf("{{CENTER_SMALL:%s}}\n", strings.ToUpper(companyNameForTicket(data))))
+	content.WriteString("================================\n")
 
 	// Compact ticket title
 	content.WriteString("        BILLET DE SORTIE\n")
@@ -583,12 +737,9 @@ func (s *Service) generateExitTicketContent(data *TicketData) string {
 func (s *Service) generateDayPassTicketContent(data *TicketData) string {
 	var content strings.Builder
 
-	// Compact header with company name
-	if data.CompanyName != "" {
-		content.WriteString("================================\n")
-		content.WriteString(fmt.Sprintf("  %s\n", strings.ToUpper("FATMA ZAHRA Services Transport")))
-		content.WriteString("================================\n")
-	}
+	content.WriteString(logoMarkerForTicket(data) + "\n")
+	content.WriteString(fmt.Sprintf("{{CENTER_SMALL:%s}}\n", strings.ToUpper(companyNameForTicket(data))))
+	content.WriteString("================================\n")
 
 	// Compact ticket title
 	content.WriteString("      BILLET PASS JOURNÉE\n")
@@ -604,7 +755,7 @@ func (s *Service) generateDayPassTicketContent(data *TicketData) string {
 		if data.SeatNumber > 0 {
 			seats = float64(data.SeatNumber)
 		}
-		feeTotal := pricing.ServiceFeePerSeatTND * seats
+		feeTotal := resolveServiceFeePerSeat(data) * seats
 		baseFromPayload := 0.0
 		if data.BasePrice > 0 {
 			baseFromPayload = data.BasePrice * seats
@@ -638,12 +789,9 @@ func (s *Service) generateDayPassTicketContent(data *TicketData) string {
 func (s *Service) generateExitPassTicketContent(data *TicketData) string {
 	var content strings.Builder
 
-	// Compact header with company name
-	if data.CompanyName != "" {
-		content.WriteString("================================\n")
-		content.WriteString(fmt.Sprintf("  %s\n", strings.ToUpper("FATMA ZAHRA Services Transport")))
-		content.WriteString("================================\n")
-	}
+	content.WriteString(logoMarkerForTicket(data) + "\n")
+	content.WriteString(fmt.Sprintf("{{CENTER_SMALL:%s}}\n", strings.ToUpper(companyNameForTicket(data))))
+	content.WriteString("================================\n")
 
 	// Compact ticket title with exit pass count in top right
 	content.WriteString("   🚪 BILLET AUTORISATION SORTIE")
@@ -668,7 +816,7 @@ func (s *Service) generateExitPassTicketContent(data *TicketData) string {
 		// Check if this is an empty vehicle (seatNumber equals vehicle capacity)
 		if data.VehicleCapacity > 0 && data.SeatNumber == data.VehicleCapacity {
 			// Empty vehicle: service fees only (200 millimes per seat × capacity)
-			serviceTotal := pricing.ServiceFeePerSeatTND * float64(data.VehicleCapacity)
+			serviceTotal := resolveServiceFeePerSeat(data) * float64(data.VehicleCapacity)
 			lineTotal := serviceTotal
 
 			content.WriteString(fmt.Sprintf("Capacité véhicule: %d sièges\n", data.VehicleCapacity))
@@ -677,7 +825,7 @@ func (s *Service) generateExitPassTicketContent(data *TicketData) string {
 		} else {
 			// Vehicle with bookings: base + fees + total
 			baseTotal := data.BasePrice * float64(data.SeatNumber)
-			serviceTotal := pricing.ServiceFeePerSeatTND * float64(data.SeatNumber)
+			serviceTotal := resolveServiceFeePerSeat(data) * float64(data.SeatNumber)
 			lineTotal := baseTotal + serviceTotal
 
 			content.WriteString(fmt.Sprintf("Sièges réservés: %d\n", data.SeatNumber))
@@ -688,7 +836,7 @@ func (s *Service) generateExitPassTicketContent(data *TicketData) string {
 	} else if data.BasePrice > 0 && data.VehicleCapacity > 0 {
 		// Fallback to vehicle capacity if seat number not available
 		baseTotal := data.BasePrice * float64(data.VehicleCapacity)
-		serviceTotal := pricing.ServiceFeePerSeatTND * float64(data.VehicleCapacity)
+		serviceTotal := resolveServiceFeePerSeat(data) * float64(data.VehicleCapacity)
 		lineTotal := baseTotal + serviceTotal
 
 		content.WriteString(fmt.Sprintf("Capacité véhicule: %d sièges\n", data.VehicleCapacity))
@@ -713,8 +861,8 @@ func (s *Service) generateExitPassTicketContent(data *TicketData) string {
 func (s *Service) generateTalonContent(data *TicketData) string {
 	var content strings.Builder
 
-	content.WriteString("================================\n")
-	content.WriteString(fmt.Sprintf("  %s\n", strings.ToUpper("FATMA ZAHRA Services Transport")))
+	content.WriteString(logoMarkerForTicket(data) + "\n")
+	content.WriteString(fmt.Sprintf("{{CENTER_SMALL:%s}}\n", strings.ToUpper(companyNameForTicket(data))))
 	content.WriteString("================================\n")
 	content.WriteString(fmt.Sprintf("Vehicule: %s\n", data.LicensePlate))
 	if data.DestinationName != "" {
@@ -726,9 +874,9 @@ func (s *Service) generateTalonContent(data *TicketData) string {
 	content.WriteString("--------------------------------\n")
 	if data.BasePrice > 0 {
 		// Talon is one seat per ticket; SeatNumber is only the printed index.
-		fee := pricing.ServiceFeePerSeatTND
+		fee := resolveServiceFeePerSeat(data)
 		baseLine := data.BasePrice
-		if data.TotalAmount > 0 {
+		if data.TotalAmount > 0 && data.BasePrice <= 0 {
 			baseLine = data.TotalAmount - fee
 			if baseLine < 0 {
 				baseLine = 0
@@ -751,12 +899,9 @@ func (s *Service) generateTalonContent(data *TicketData) string {
 func (s *Service) generateStandardTicketContent(data *TicketData) string {
 	var content strings.Builder
 
-	// Compact header with company name
-	if data.CompanyName != "" {
-		content.WriteString("================================\n")
-		content.WriteString(fmt.Sprintf("  %s\n", strings.ToUpper("FATMA ZAHRA Services Transport")))
-		content.WriteString("================================\n")
-	}
+	content.WriteString(logoMarkerForTicket(data) + "\n")
+	content.WriteString(fmt.Sprintf("{{CENTER_SMALL:%s}}\n", strings.ToUpper(companyNameForTicket(data))))
+	content.WriteString("================================\n")
 
 	// Compact ticket title
 	content.WriteString("        BILLET STANDARD\n")
@@ -834,6 +979,30 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 			setTextScale(0x22)
 			buffer.WriteString(value)
 			buffer.WriteByte(0x0A) // Line feed
+			resetStyle()
+			continue
+		}
+
+		if line == "{{COMPANY_LOGO}}" {
+			setAlign(0x01)
+			if logoData, err := defaultLogoEscPos(); err == nil && len(logoData) > 0 {
+				buffer.Write(logoData)
+				buffer.WriteByte(0x0A)
+			}
+			resetStyle()
+			continue
+		}
+
+		if strings.HasPrefix(line, "{{LOGO_PATH:") && strings.HasSuffix(line, "}}") {
+			raw := strings.TrimSuffix(strings.TrimPrefix(line, "{{LOGO_PATH:"), "}}")
+			setAlign(0x01)
+			path := resolveLogoPath(raw)
+			if path != "" {
+				if logoData, err := pngFileToEscPosRaster(path, 256); err == nil && len(logoData) > 0 {
+					buffer.Write(logoData)
+					buffer.WriteByte(0x0A)
+				}
+			}
 			resetStyle()
 			continue
 		}

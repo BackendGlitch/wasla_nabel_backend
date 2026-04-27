@@ -95,6 +95,7 @@ type TicketData struct {
 	// Vehicle and pricing information
 	VehicleCapacity int     `json:"vehicleCapacity,omitempty"` // Vehicle capacity for total amount calculation
 	BasePrice       float64 `json:"basePrice,omitempty"`       // Base price per seat from route
+	ServiceFee      float64 `json:"serviceFee,omitempty"`      // Service fee per seat from route
 	// Exit pass count for today
 	ExitPassCount int `json:"exitPassCount,omitempty"` // Current count of exit passes for today
 	// Company branding
@@ -115,6 +116,7 @@ type ExitPassAndRemoveRequest struct {
 	BookedSeats     int                    `json:"bookedSeats" binding:"required"`
 	TotalSeats      int                    `json:"totalSeats" binding:"required"`
 	BasePrice       float64                `json:"basePrice" binding:"required"`
+	ServiceFee      float64                `json:"serviceFee,omitempty"` // Service fee per seat from route
 	CreatedBy       string                 `json:"createdBy" binding:"required"`
 	StationName     string                 `json:"stationName"`
 	RouteName       string                 `json:"routeName"`

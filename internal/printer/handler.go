@@ -384,15 +384,19 @@ func (h *Handler) PrintExitPassAndRemoveFromQueue(c *gin.Context) {
 
 	var totalAmount float64
 	var seatNumber int
+	serviceFeePerSeat := request.ServiceFee
+	if serviceFeePerSeat <= 0 {
+		serviceFeePerSeat = pricing.ServiceFeePerSeatTND
+	}
 
 	// Check if vehicle has bookings or is empty
 	if request.BookedSeats > 0 {
 		// Per seat: base + 200 millimes (0.2 TND) service fee
-		totalAmount = float64(request.BookedSeats) * (request.BasePrice + pricing.ServiceFeePerSeatTND)
+		totalAmount = float64(request.BookedSeats) * (request.BasePrice + serviceFeePerSeat)
 		seatNumber = request.BookedSeats
 	} else {
 		// Empty vehicle: service fees only (200 millimes × capacity)
-		totalAmount = pricing.ServiceFeePerSeatTND * float64(request.TotalSeats)
+		totalAmount = serviceFeePerSeat * float64(request.TotalSeats)
 		seatNumber = request.TotalSeats
 	}
 
@@ -408,6 +412,7 @@ func (h *Handler) PrintExitPassAndRemoveFromQueue(c *gin.Context) {
 		RouteName:       request.RouteName,
 		VehicleCapacity: request.TotalSeats,
 		BasePrice:       request.BasePrice,
+		ServiceFee:      serviceFeePerSeat,
 		ExitPassCount:   request.ExitPassCount,
 		CompanyName:     request.CompanyName,
 		CompanyLogo:     request.CompanyLogo,
