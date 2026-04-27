@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"image/png"
 	"math"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -521,7 +522,9 @@ func resolveLogoPath(path string) string {
 		return ""
 	}
 	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-		return ""
+		if u, err := url.Parse(path); err == nil {
+			path = strings.TrimSpace(u.Path)
+		}
 	}
 	if filepath.IsAbs(path) {
 		if _, err := os.Stat(path); err == nil {
