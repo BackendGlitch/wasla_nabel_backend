@@ -384,7 +384,8 @@ func (r *RepositoryImpl) CreateBookingByDestination(ctx context.Context, req Cre
 	b.VehicleID = vehicleID
 	b.LicensePlate = licensePlate
 	b.SeatsBooked = req.Seats
-	b.TotalAmount = float64(req.Seats) * pricePerSeat
+	seatPrice := pricePerSeat + pricing.ServiceFeePerSeatTND // Always base + 0.2 TND per seat
+	b.TotalAmount = float64(req.Seats) * seatPrice
 	b.BookingStatus = "ACTIVE"
 	b.PaymentStatus = "PAID"
 	b.CreatedBy = req.StaffID
@@ -404,7 +405,7 @@ func (r *RepositoryImpl) CreateBookingByDestination(ctx context.Context, req Cre
 				LPAD(CAST(FLOOR(random()*1000000) AS TEXT), 6, '0'), false, $4, $5
 			)
 			ON CONFLICT (verification_code) DO NOTHING
-			RETURNING id, verification_code, created_at`, queueID, req.Seats, float64(req.Seats)*pricePerSeat, req.StaffID, nullableText(req.IdempotencyKey), req.DestinationID)
+			RETURNING id, verification_code, created_at`, queueID, req.Seats, float64(req.Seats)*seatPrice, req.StaffID, nullableText(req.IdempotencyKey), req.DestinationID)
 
 		if err := row.Scan(&b.ID, &b.VerificationCode, &b.CreatedAt); err != nil {
 			if err == pgx.ErrNoRows {

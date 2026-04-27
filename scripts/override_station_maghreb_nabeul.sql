@@ -131,11 +131,11 @@ INSERT INTO station_config (
 INSERT INTO routes (
   id, station_id, station_name, base_price, governorate, governorate_ar, delegation, delegation_ar, is_active, updated_at
 ) VALUES
-  ('route_grombalia',       'dest_grombalia',        'Grombalia',         0, 'Nabeul', 'نابل', 'Nabeul', 'نابل', true, NOW()),
-  ('route_beni_khalled',    'dest_beni_khalled',     'Beni Khalled',      0, 'Nabeul', 'نابل', 'Nabeul', 'نابل', true, NOW()),
-  ('route_menzel_bouzelfa', 'dest_menzel_bouzelfa',  'Menzel Bouzelfa',   0, 'Nabeul', 'نابل', 'Nabeul', 'نابل', true, NOW()),
-  ('route_soliman',         'dest_soliman',          'Soliman',           0, 'Nabeul', 'نابل', 'Nabeul', 'نابل', true, NOW()),
-  ('route_belli_mhazba',    'dest_belli_mhazba',     'Belli - El Mhazba', 0, 'Nabeul', 'نابل', 'Nabeul', 'نابل', true, NOW());
+  ('route_grombalia',       'dest_grombalia',        'Grombalia',         3.800, 'Nabeul', 'نابل', 'Nabeul', 'نابل', true, NOW()),
+  ('route_beni_khalled',    'dest_beni_khalled',     'Beni Khalled',      3.600, 'Nabeul', 'نابل', 'Nabeul', 'نابل', true, NOW()),
+  ('route_menzel_bouzelfa', 'dest_menzel_bouzelfa',  'Menzel Bouzelfa',   3.400, 'Nabeul', 'نابل', 'Nabeul', 'نابل', true, NOW()),
+  ('route_soliman',         'dest_soliman',          'Soliman',           4.200, 'Nabeul', 'نابل', 'Nabeul', 'نابل', true, NOW()),
+  ('route_belli_mhazba',    'dest_belli_mhazba',     'Belli - El Mhazba', 4.000, 'Nabeul', 'نابل', 'Nabeul', 'نابل', true, NOW());
 
 COMMIT;
 
