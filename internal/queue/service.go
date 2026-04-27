@@ -29,8 +29,8 @@ func (s *Service) ValidateLicensePlate(lp string) bool {
 }
 
 // Routes
-func (s *Service) ListRoutes(ctx context.Context) ([]Route, error) {
-	return s.repo.ListRoutes(ctx)
+func (s *Service) ListRoutes(ctx context.Context, includeInactive bool) ([]Route, error) {
+	return s.repo.ListRoutes(ctx, includeInactive)
 }
 
 func (s *Service) CreateRoute(ctx context.Context, req CreateRouteRequest) (*Route, error) {

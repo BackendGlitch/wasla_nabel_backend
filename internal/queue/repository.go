@@ -11,8 +11,8 @@ import (
 )
 
 type Repository interface {
-	// Routes
-	ListRoutes(ctx context.Context) ([]Route, error)
+	// Routes (includeInactive: list inactive rows too, for management CRUD)
+	ListRoutes(ctx context.Context, includeInactive bool) ([]Route, error)
 	CreateRoute(ctx context.Context, r CreateRouteRequest) (*Route, error)
 	UpdateRoute(ctx context.Context, id string, r UpdateRouteRequest) (*Route, error)
 	DeleteRoute(ctx context.Context, id string) error
@@ -94,11 +94,16 @@ func NewRepository(db *pgxpool.Pool) Repository {
 
 // ===== Routes =====
 
-func (r *RepositoryImpl) ListRoutes(ctx context.Context) ([]Route, error) {
-	rows, err := r.db.Query(ctx, `
+func (r *RepositoryImpl) ListRoutes(ctx context.Context, includeInactive bool) ([]Route, error) {
+	q := `
 		SELECT id, station_id, station_name, base_price, governorate, governorate_ar,
 		       delegation, delegation_ar, is_active, updated_at
-		FROM routes WHERE is_active = true ORDER BY station_name ASC`)
+		FROM routes`
+	if !includeInactive {
+		q += ` WHERE is_active = true`
+	}
+	q += ` ORDER BY station_name ASC`
+	rows, err := r.db.Query(ctx, q)
 	if err != nil {
 		return nil, err
 	}

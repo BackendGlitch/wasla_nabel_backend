@@ -19,7 +19,9 @@ func NewHandler(service *Service) *Handler { return &Handler{service: service} }
 // ===== Routes =====
 
 func (h *Handler) ListRoutes(c *gin.Context) {
-	list, err := h.service.ListRoutes(context.Background())
+	q := c.DefaultQuery("all", "")
+	includeInactive := q == "1" || q == "true" || q == "yes"
+	list, err := h.service.ListRoutes(context.Background(), includeInactive)
 	if err != nil {
 		utils.InternalServerErrorResponse(c, "Failed to list routes", err)
 		return
