@@ -7,6 +7,7 @@ type Route struct {
 	StationID     string    `json:"stationId"`
 	StationName   string    `json:"stationName"`
 	BasePrice     float64   `json:"basePrice"`
+	ServiceFee    float64   `json:"serviceFee"`
 	Governorate   *string   `json:"governorate,omitempty"`
 	GovernorateAr *string   `json:"governorateAr,omitempty"`
 	Delegation    *string   `json:"delegation,omitempty"`
@@ -19,6 +20,7 @@ type Destination struct {
 	ID        string  `json:"id"`
 	Name      string  `json:"name"`
 	BasePrice float64 `json:"basePrice"`
+	ServiceFee float64 `json:"serviceFee"`
 	IsActive  bool    `json:"isActive"`
 }
 
@@ -102,6 +104,7 @@ type CreateRouteRequest struct {
 	StationID     string  `json:"stationId" binding:"required"`
 	StationName   string  `json:"stationName" binding:"required"`
 	BasePrice     float64 `json:"basePrice" binding:"required"`
+	ServiceFee    *float64 `json:"serviceFee,omitempty"`
 	Governorate   *string `json:"governorate"`
 	GovernorateAr *string `json:"governorateAr"`
 	Delegation    *string `json:"delegation"`
@@ -111,6 +114,7 @@ type CreateRouteRequest struct {
 type UpdateRouteRequest struct {
 	StationName   *string  `json:"stationName"`
 	BasePrice     *float64 `json:"basePrice"`
+	ServiceFee    *float64 `json:"serviceFee"`
 	Governorate   *string  `json:"governorate"`
 	GovernorateAr *string  `json:"governorateAr"`
 	Delegation    *string  `json:"delegation"`

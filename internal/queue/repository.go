@@ -96,7 +96,7 @@ func NewRepository(db *pgxpool.Pool) Repository {
 
 func (r *RepositoryImpl) ListRoutes(ctx context.Context, includeInactive bool) ([]Route, error) {
 	q := `
-		SELECT id, station_id, station_name, base_price, governorate, governorate_ar,
+		SELECT id, station_id, station_name, base_price, COALESCE(service_fee, 0.200), governorate, governorate_ar,
 		       delegation, delegation_ar, is_active, updated_at
 		FROM routes`
 	if !includeInactive {
@@ -112,7 +112,7 @@ func (r *RepositoryImpl) ListRoutes(ctx context.Context, includeInactive bool) (
 	var list []Route
 	for rows.Next() {
 		var rt Route
-		if err := rows.Scan(&rt.ID, &rt.StationID, &rt.StationName, &rt.BasePrice, &rt.Governorate,
+		if err := rows.Scan(&rt.ID, &rt.StationID, &rt.StationName, &rt.BasePrice, &rt.ServiceFee, &rt.Governorate,
 			&rt.GovernorateAr, &rt.Delegation, &rt.DelegationAr, &rt.IsActive, &rt.UpdatedAt); err != nil {
 			return nil, err
 		}
@@ -122,13 +122,17 @@ func (r *RepositoryImpl) ListRoutes(ctx context.Context, includeInactive bool) (
 }
 
 func (r *RepositoryImpl) CreateRoute(ctx context.Context, req CreateRouteRequest) (*Route, error) {
+	serviceFee := 0.2
+	if req.ServiceFee != nil {
+		serviceFee = *req.ServiceFee
+	}
 	row := r.db.QueryRow(ctx, `
-		INSERT INTO routes (id, station_id, station_name, base_price, governorate, governorate_ar, delegation, delegation_ar, is_active)
-		VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, true)
-		RETURNING id, station_id, station_name, base_price, governorate, governorate_ar, delegation, delegation_ar, is_active, updated_at`,
-		req.StationID, req.StationName, req.BasePrice, req.Governorate, req.GovernorateAr, req.Delegation, req.DelegationAr)
+		INSERT INTO routes (id, station_id, station_name, base_price, service_fee, governorate, governorate_ar, delegation, delegation_ar, is_active)
+		VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, true)
+		RETURNING id, station_id, station_name, base_price, COALESCE(service_fee, 0.200), governorate, governorate_ar, delegation, delegation_ar, is_active, updated_at`,
+		req.StationID, req.StationName, req.BasePrice, serviceFee, req.Governorate, req.GovernorateAr, req.Delegation, req.DelegationAr)
 	var rt Route
-	if err := row.Scan(&rt.ID, &rt.StationID, &rt.StationName, &rt.BasePrice, &rt.Governorate,
+	if err := row.Scan(&rt.ID, &rt.StationID, &rt.StationName, &rt.BasePrice, &rt.ServiceFee, &rt.Governorate,
 		&rt.GovernorateAr, &rt.Delegation, &rt.DelegationAr, &rt.IsActive, &rt.UpdatedAt); err != nil {
 		return nil, err
 	}
@@ -141,23 +145,24 @@ func (r *RepositoryImpl) UpdateRoute(ctx context.Context, id string, req UpdateR
 		UPDATE routes SET 
 		  station_name = COALESCE($2, station_name),
 		  base_price   = COALESCE($3, base_price),
-		  governorate  = COALESCE($4, governorate),
-		  governorate_ar = COALESCE($5, governorate_ar),
-		  delegation   = COALESCE($6, delegation),
-		  delegation_ar = COALESCE($7, delegation_ar),
-		  is_active    = COALESCE($8, is_active),
+		  service_fee  = COALESCE($4, service_fee),
+		  governorate  = COALESCE($5, governorate),
+		  governorate_ar = COALESCE($6, governorate_ar),
+		  delegation   = COALESCE($7, delegation),
+		  delegation_ar = COALESCE($8, delegation_ar),
+		  is_active    = COALESCE($9, is_active),
 		  updated_at   = NOW()
-		WHERE id = $1`, id, req.StationName, req.BasePrice, req.Governorate, req.GovernorateAr, req.Delegation, req.DelegationAr, req.IsActive)
+		WHERE id = $1`, id, req.StationName, req.BasePrice, req.ServiceFee, req.Governorate, req.GovernorateAr, req.Delegation, req.DelegationAr, req.IsActive)
 	if err != nil {
 		return nil, err
 	}
 
 	row := r.db.QueryRow(ctx, `
-		SELECT id, station_id, station_name, base_price, governorate, governorate_ar,
+		SELECT id, station_id, station_name, base_price, COALESCE(service_fee, 0.200), governorate, governorate_ar,
 		       delegation, delegation_ar, is_active, updated_at
 		FROM routes WHERE id = $1`, id)
 	var rt Route
-	if err := row.Scan(&rt.ID, &rt.StationID, &rt.StationName, &rt.BasePrice, &rt.Governorate,
+	if err := row.Scan(&rt.ID, &rt.StationID, &rt.StationName, &rt.BasePrice, &rt.ServiceFee, &rt.Governorate,
 		&rt.GovernorateAr, &rt.Delegation, &rt.DelegationAr, &rt.IsActive, &rt.UpdatedAt); err != nil {
 		return nil, err
 	}
@@ -1049,7 +1054,7 @@ func (r *RepositoryImpl) ListQueueSummaries(ctx context.Context, station string)
 
 func (r *RepositoryImpl) ListAllDestinations(ctx context.Context) ([]Destination, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT station_id, station_name, base_price, is_active
+		SELECT station_id, station_name, base_price, COALESCE(service_fee, 0.200), is_active
 		FROM routes
 		WHERE is_active = true
 		ORDER BY station_name ASC`)
@@ -1061,7 +1066,7 @@ func (r *RepositoryImpl) ListAllDestinations(ctx context.Context) ([]Destination
 	var destinations []Destination
 	for rows.Next() {
 		var dest Destination
-		if err := rows.Scan(&dest.ID, &dest.Name, &dest.BasePrice, &dest.IsActive); err != nil {
+		if err := rows.Scan(&dest.ID, &dest.Name, &dest.BasePrice, &dest.ServiceFee, &dest.IsActive); err != nil {
 			return nil, err
 		}
 		destinations = append(destinations, dest)

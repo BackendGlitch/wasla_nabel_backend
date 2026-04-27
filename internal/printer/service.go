@@ -493,19 +493,20 @@ func (s *Service) generateBookingTicketContent(data *TicketData) string {
 
 	// Detailed pricing breakdown
 	if data.BasePrice > 0 {
-		// 200 millimes (0.2 TND) per seat
-		seats := float64(data.SeatNumber)
-		if seats == 0 {
-			seats = 1 // Default to 1 seat if not specified
+		// SeatNumber is an index label, not a quantity; pricing is for one ticket here.
+		fee := pricing.ServiceFeePerSeatTND
+		baseLine := data.BasePrice
+		if data.TotalAmount > 0 {
+			baseLine = data.TotalAmount - fee
+			if baseLine < 0 {
+				baseLine = 0
+			}
 		}
+		totalLine := baseLine + fee
 
-		baseTotal := data.BasePrice * seats
-		serviceTotal := pricing.ServiceFeePerSeatTND * seats
-		lineTotal := baseTotal + serviceTotal
-
-		content.WriteString(fmt.Sprintf("Prix de base: %.2f TND\n", baseTotal))
-		content.WriteString(fmt.Sprintf("Frais: %.2f TND\n", serviceTotal))
-		content.WriteString(fmt.Sprintf("Total: %.2f TND\n", lineTotal))
+		content.WriteString(fmt.Sprintf("Prix de base: %.2f TND\n", baseLine))
+		content.WriteString(fmt.Sprintf("Frais de services: %.2f TND\n", fee))
+		content.WriteString(fmt.Sprintf("Total: %.2f TND\n", totalLine))
 	} else {
 		content.WriteString(fmt.Sprintf("Montant: %.2f TND\n", data.TotalAmount))
 	}
@@ -620,7 +621,7 @@ func (s *Service) generateDayPassTicketContent(data *TicketData) string {
 		}
 		lineTotal := baseLine + feeTotal
 		content.WriteString(fmt.Sprintf("Prix de base: %.2f TND\n", baseLine))
-		content.WriteString(fmt.Sprintf("Frais: %.2f TND\n", feeTotal))
+		content.WriteString(fmt.Sprintf("Frais de services: %.2f TND\n", feeTotal))
 		content.WriteString(fmt.Sprintf("Total: %.2f TND\n", lineTotal))
 	}
 	content.WriteString(fmt.Sprintf("Date: %s\n", data.CreatedAt.Format("02/01/2006 15:04")))
@@ -671,7 +672,7 @@ func (s *Service) generateExitPassTicketContent(data *TicketData) string {
 			lineTotal := serviceTotal
 
 			content.WriteString(fmt.Sprintf("Capacité véhicule: %d sièges\n", data.VehicleCapacity))
-			content.WriteString(fmt.Sprintf("Frais: %.2f TND\n", serviceTotal))
+			content.WriteString(fmt.Sprintf("Frais de services: %.2f TND\n", serviceTotal))
 			content.WriteString(fmt.Sprintf("Total: %.2f TND\n", lineTotal))
 		} else {
 			// Vehicle with bookings: base + fees + total
@@ -681,7 +682,7 @@ func (s *Service) generateExitPassTicketContent(data *TicketData) string {
 
 			content.WriteString(fmt.Sprintf("Sièges réservés: %d\n", data.SeatNumber))
 			content.WriteString(fmt.Sprintf("Prix de base: %.2f TND\n", baseTotal))
-			content.WriteString(fmt.Sprintf("Frais: %.2f TND\n", serviceTotal))
+			content.WriteString(fmt.Sprintf("Frais de services: %.2f TND\n", serviceTotal))
 			content.WriteString(fmt.Sprintf("Total: %.2f TND\n", lineTotal))
 		}
 	} else if data.BasePrice > 0 && data.VehicleCapacity > 0 {
@@ -692,7 +693,7 @@ func (s *Service) generateExitPassTicketContent(data *TicketData) string {
 
 		content.WriteString(fmt.Sprintf("Capacité véhicule: %d sièges\n", data.VehicleCapacity))
 		content.WriteString(fmt.Sprintf("Prix de base: %.2f TND\n", baseTotal))
-		content.WriteString(fmt.Sprintf("Frais: %.2f TND\n", serviceTotal))
+		content.WriteString(fmt.Sprintf("Frais de services: %.2f TND\n", serviceTotal))
 		content.WriteString(fmt.Sprintf("Total: %.2f TND\n", lineTotal))
 	} else {
 		content.WriteString(fmt.Sprintf("Total: %.2f TND\n", data.TotalAmount))
@@ -724,16 +725,19 @@ func (s *Service) generateTalonContent(data *TicketData) string {
 	content.WriteString(fmt.Sprintf("{{BIG_INDEX:%d}}\n", data.SeatNumber))
 	content.WriteString("--------------------------------\n")
 	if data.BasePrice > 0 {
-		seats := float64(data.SeatNumber)
-		if seats < 1 {
-			seats = 1
+		// Talon is one seat per ticket; SeatNumber is only the printed index.
+		fee := pricing.ServiceFeePerSeatTND
+		baseLine := data.BasePrice
+		if data.TotalAmount > 0 {
+			baseLine = data.TotalAmount - fee
+			if baseLine < 0 {
+				baseLine = 0
+			}
 		}
-		baseTotal := data.BasePrice * seats
-		serviceTotal := pricing.ServiceFeePerSeatTND * seats
-		lineTotal := baseTotal + serviceTotal
-		content.WriteString(fmt.Sprintf("Prix de base: %.2f TND\n", baseTotal))
-		content.WriteString(fmt.Sprintf("Frais: %.2f TND\n", serviceTotal))
-		content.WriteString(fmt.Sprintf("Total: %.2f TND\n", lineTotal))
+		totalLine := baseLine + fee
+		content.WriteString(fmt.Sprintf("Prix de base: %.2f TND\n", baseLine))
+		content.WriteString(fmt.Sprintf("Frais de services: %.2f TND\n", fee))
+		content.WriteString(fmt.Sprintf("Total: %.2f TND\n", totalLine))
 	} else {
 		content.WriteString(fmt.Sprintf("Montant: %.2f TND\n", data.TotalAmount))
 	}

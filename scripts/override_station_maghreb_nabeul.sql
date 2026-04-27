@@ -52,6 +52,7 @@ ALTER TABLE IF EXISTS station_config ADD COLUMN IF NOT EXISTS company_logo_url T
 -- Route Arabic metadata (optional; kept for bilingual display if UI uses it).
 ALTER TABLE IF EXISTS routes ADD COLUMN IF NOT EXISTS governorate_ar TEXT NULL;
 ALTER TABLE IF EXISTS routes ADD COLUMN IF NOT EXISTS delegation_ar TEXT NULL;
+ALTER TABLE IF EXISTS routes ADD COLUMN IF NOT EXISTS service_fee NUMERIC(10,3) NOT NULL DEFAULT 0.200;
 
 -- ---------------------------------------------------------------------------
 -- 1) Clear operational + master data (schema preserved)
@@ -129,13 +130,13 @@ INSERT INTO station_config (
 -- NOTE: in this codebase, routes.station_id is treated as destination id.
 -- ---------------------------------------------------------------------------
 INSERT INTO routes (
-  id, station_id, station_name, base_price, governorate, governorate_ar, delegation, delegation_ar, is_active, updated_at
+  id, station_id, station_name, base_price, service_fee, governorate, governorate_ar, delegation, delegation_ar, is_active, updated_at
 ) VALUES
-  ('route_grombalia',       'dest_grombalia',        'Grombalia',         3.800, 'Nabeul', 'نابل', 'Nabeul', 'نابل', true, NOW()),
-  ('route_beni_khalled',    'dest_beni_khalled',     'Beni Khalled',      3.600, 'Nabeul', 'نابل', 'Nabeul', 'نابل', true, NOW()),
-  ('route_menzel_bouzelfa', 'dest_menzel_bouzelfa',  'Menzel Bouzelfa',   3.400, 'Nabeul', 'نابل', 'Nabeul', 'نابل', true, NOW()),
-  ('route_soliman',         'dest_soliman',          'Soliman',           4.200, 'Nabeul', 'نابل', 'Nabeul', 'نابل', true, NOW()),
-  ('route_belli_mhazba',    'dest_belli_mhazba',     'Belli - El Mhazba', 4.000, 'Nabeul', 'نابل', 'Nabeul', 'نابل', true, NOW());
+  ('route_grombalia',       'dest_grombalia',        'Grombalia',         3.800, 0.200, 'Nabeul', 'نابل', 'Nabeul', 'نابل', true, NOW()),
+  ('route_beni_khalled',    'dest_beni_khalled',     'Beni Khalled',      3.600, 0.100, 'Nabeul', 'نابل', 'Nabeul', 'نابل', true, NOW()),
+  ('route_menzel_bouzelfa', 'dest_menzel_bouzelfa',  'Menzel Bouzelfa',   3.400, 0.050, 'Nabeul', 'نابل', 'Nabeul', 'نابل', true, NOW()),
+  ('route_soliman',         'dest_soliman',          'Soliman',           4.200, 0.200, 'Nabeul', 'نابل', 'Nabeul', 'نابل', true, NOW()),
+  ('route_belli_mhazba',    'dest_belli_mhazba',     'Belli - El Mhazba', 4.000, 0.200, 'Nabeul', 'نابل', 'Nabeul', 'نابل', true, NOW());
 
 COMMIT;
 

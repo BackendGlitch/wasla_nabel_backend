@@ -163,7 +163,7 @@ func (r *RepositoryImpl) getBookingsByIdempotencyTx(ctx context.Context, tx pgx.
 
 // resolveGhostDestination normalizes the incoming destination identifier into a concrete active route station_id.
 // It accepts direct station_id, exact station_name, and resolves the grouped "moknin-tboulba" alias.
-func (r *RepositoryImpl) resolveGhostDestination(ctx context.Context, tx pgx.Tx, requestedDestinationID, staffID string) (string, string, float64, error) {
+func (r *RepositoryImpl) resolveGhostDestination(ctx context.Context, tx pgx.Tx, requestedDestinationID, staffID string) (string, string, float64, float64, error) {
 	normalized := strings.ToLower(strings.TrimSpace(requestedDestinationID))
 	normalized = strings.ReplaceAll(normalized, "_", "-")
 
@@ -183,9 +183,9 @@ func (r *RepositoryImpl) resolveGhostDestination(ctx context.Context, tx pgx.Tx,
 		if err == nil {
 			candidateIDs = []string{recentID}
 		} else if err != pgx.ErrNoRows {
-			return "", "", 0, err
+			return "", "", 0, 0, err
 		} else {
-			return "", "", 0, fmt.Errorf("ambiguous destination %q; send station-moknin or station-teboulba", requestedDestinationID)
+			return "", "", 0, 0, fmt.Errorf("ambiguous destination %q; send station-moknin or station-teboulba", requestedDestinationID)
 		}
 	default:
 		// Also allow exact station_name payloads (e.g. "MOKNIN", "TEBOULBA") from legacy clients.
@@ -199,22 +199,23 @@ func (r *RepositoryImpl) resolveGhostDestination(ctx context.Context, tx pgx.Tx,
 		var destinationID string
 		var destinationName string
 		var basePrice float64
+		var serviceFee float64
 
 		err := tx.QueryRow(ctx, `
-			SELECT station_id, station_name, base_price
+			SELECT station_id, station_name, base_price, COALESCE(service_fee, $2)
 			FROM routes
 			WHERE is_active = true
 			  AND (station_id = $1 OR UPPER(station_name) = UPPER($1))
-			LIMIT 1`, candidate).Scan(&destinationID, &destinationName, &basePrice)
+			LIMIT 1`, candidate, pricing.ServiceFeePerSeatTND).Scan(&destinationID, &destinationName, &basePrice, &serviceFee)
 		if err == nil {
-			return destinationID, destinationName, basePrice, nil
+			return destinationID, destinationName, basePrice, serviceFee, nil
 		}
 		if err != pgx.ErrNoRows {
-			return "", "", 0, err
+			return "", "", 0, 0, err
 		}
 	}
 
-	return "", "", 0, fmt.Errorf("destination not found: %s", requestedDestinationID)
+	return "", "", 0, 0, fmt.Errorf("destination not found: %s", requestedDestinationID)
 }
 
 func NewRepository(db *pgxpool.Pool) Repository { return &RepositoryImpl{db: db} }
@@ -248,6 +249,7 @@ func (r *RepositoryImpl) CreateBookingByDestination(ctx context.Context, req Cre
 	var row pgx.Row
 	var queueID, vehicleID string
 	var pricePerSeat float64
+	var serviceFeePerSeat float64
 	{
 		if req.SubRoute != nil && *req.SubRoute != "" {
 			row = tx.QueryRow(ctx, `
@@ -265,7 +267,7 @@ func (r *RepositoryImpl) CreateBookingByDestination(ctx context.Context, req Cre
                 FROM candidate c
                 LEFT JOIN routes r ON r.station_id = c.destination_id
                 WHERE q.id = c.id
-                RETURNING q.id, q.vehicle_id, COALESCE(r.base_price, q.base_price)`, req.DestinationID, req.Seats, *req.SubRoute)
+                RETURNING q.id, q.vehicle_id, COALESCE(r.base_price, q.base_price), COALESCE(r.service_fee, $4)`, req.DestinationID, req.Seats, *req.SubRoute, pricing.ServiceFeePerSeatTND)
 		} else {
 			row = tx.QueryRow(ctx, `
                 WITH candidate AS (
@@ -282,17 +284,18 @@ func (r *RepositoryImpl) CreateBookingByDestination(ctx context.Context, req Cre
                 FROM candidate c
                 LEFT JOIN routes r ON r.station_id = c.destination_id
                 WHERE q.id = c.id
-                RETURNING q.id, q.vehicle_id, COALESCE(r.base_price, q.base_price)`, req.DestinationID, req.Seats)
+                RETURNING q.id, q.vehicle_id, COALESCE(r.base_price, q.base_price), COALESCE(r.service_fee, $3)`, req.DestinationID, req.Seats, pricing.ServiceFeePerSeatTND)
 		}
 		var tmpQ, tmpV string
 		var tmpP float64
-		if err := row.Scan(&tmpQ, &tmpV, &tmpP); err != nil {
+		var tmpF float64
+		if err := row.Scan(&tmpQ, &tmpV, &tmpP, &tmpF); err != nil {
 			if err != pgx.ErrNoRows {
 				return nil, err
 			}
 		} else {
 			// exact fit success; set for downstream use
-			queueID, vehicleID, pricePerSeat = tmpQ, tmpV, tmpP
+			queueID, vehicleID, pricePerSeat, serviceFeePerSeat = tmpQ, tmpV, tmpP, tmpF
 		}
 	}
 
@@ -314,7 +317,7 @@ func (r *RepositoryImpl) CreateBookingByDestination(ctx context.Context, req Cre
                 FROM candidate c
                 LEFT JOIN routes r ON r.station_id = c.destination_id
                 WHERE q.id = c.id
-                RETURNING q.id, q.vehicle_id, COALESCE(r.base_price, q.base_price)`, req.DestinationID, req.Seats, *req.SubRoute)
+                RETURNING q.id, q.vehicle_id, COALESCE(r.base_price, q.base_price), COALESCE(r.service_fee, $4)`, req.DestinationID, req.Seats, *req.SubRoute, pricing.ServiceFeePerSeatTND)
 		} else {
 			row = tx.QueryRow(ctx, `
                 WITH candidate AS (
@@ -331,10 +334,10 @@ func (r *RepositoryImpl) CreateBookingByDestination(ctx context.Context, req Cre
                 FROM candidate c
                 LEFT JOIN routes r ON r.station_id = c.destination_id
                 WHERE q.id = c.id
-                RETURNING q.id, q.vehicle_id, COALESCE(r.base_price, q.base_price)`, req.DestinationID, req.Seats)
+                RETURNING q.id, q.vehicle_id, COALESCE(r.base_price, q.base_price), COALESCE(r.service_fee, $3)`, req.DestinationID, req.Seats, pricing.ServiceFeePerSeatTND)
 		}
 
-		if err := row.Scan(&queueID, &vehicleID, &pricePerSeat); err != nil {
+		if err := row.Scan(&queueID, &vehicleID, &pricePerSeat, &serviceFeePerSeat); err != nil {
 			if err == pgx.ErrNoRows {
 				return nil, fmt.Errorf("no vehicle with enough seats available for this destination")
 			}
@@ -384,7 +387,7 @@ func (r *RepositoryImpl) CreateBookingByDestination(ctx context.Context, req Cre
 	b.VehicleID = vehicleID
 	b.LicensePlate = licensePlate
 	b.SeatsBooked = req.Seats
-	seatPrice := pricePerSeat + pricing.ServiceFeePerSeatTND // Always base + 0.2 TND per seat
+	seatPrice := pricePerSeat + serviceFeePerSeat // base + per-destination service fee
 	b.TotalAmount = float64(req.Seats) * seatPrice
 	b.BookingStatus = "ACTIVE"
 	b.PaymentStatus = "PAID"
@@ -658,13 +661,14 @@ func (r *RepositoryImpl) CreateBookingByQueueEntry(ctx context.Context, req Crea
 	}
 	var queueID, vehicleID string
 	var pricePerSeat float64
+	var serviceFeePerSeat float64
 	var availableSeats int
 	err = tx.QueryRow(ctx, `
-		SELECT q.id, q.vehicle_id, COALESCE(r.base_price, q.base_price), q.available_seats
+		SELECT q.id, q.vehicle_id, COALESCE(r.base_price, q.base_price), COALESCE(r.service_fee, $2), q.available_seats
 		FROM vehicle_queue q
 		LEFT JOIN routes r ON r.station_id = q.destination_id
 		WHERE q.id = $1 AND q.queue_type='REGULAR' AND q.status IN ('WAITING','LOADING','READY')
-		FOR UPDATE OF q`, req.QueueEntryID).Scan(&queueID, &vehicleID, &pricePerSeat, &availableSeats)
+		FOR UPDATE OF q`, req.QueueEntryID, pricing.ServiceFeePerSeatTND).Scan(&queueID, &vehicleID, &pricePerSeat, &serviceFeePerSeat, &availableSeats)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, fmt.Errorf("queue entry not found or not available for booking")
@@ -782,7 +786,7 @@ func (r *RepositoryImpl) CreateBookingByQueueEntry(ctx context.Context, req Crea
 
 	// Create individual bookings for each seat
 	var bookings []Booking
-	seatPrice := pricePerSeat + pricing.ServiceFeePerSeatTND // base + 200 millimes / siège
+	seatPrice := pricePerSeat + serviceFeePerSeat // base + per-destination service fee
 
 	for i := 0; i < req.Seats; i++ {
 		var bookingID string
@@ -971,7 +975,7 @@ func (r *RepositoryImpl) CreateGhostBooking(ctx context.Context, req CreateGhost
 		}
 	}
 
-	resolvedDestinationID, destinationName, basePrice, err := r.resolveGhostDestination(ctx, tx, req.DestinationID, req.StaffID)
+	resolvedDestinationID, destinationName, basePrice, serviceFeePerSeat, err := r.resolveGhostDestination(ctx, tx, req.DestinationID, req.StaffID)
 	if err != nil {
 		return nil, err
 	}
@@ -1010,7 +1014,7 @@ func (r *RepositoryImpl) CreateGhostBooking(ctx context.Context, req CreateGhost
 		return nil, err
 	}
 
-	seatPrice := basePrice + pricing.ServiceFeePerSeatTND
+	seatPrice := basePrice + serviceFeePerSeat
 	const verificationCodeSpace = 10000
 	const verificationCodeStep = 9973
 
