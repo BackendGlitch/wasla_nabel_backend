@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -447,7 +448,6 @@ func (r *RepositoryImpl) ListQueue(ctx context.Context, destinationID string, su
                     ) as has_trips_today
                 FROM day_passes dp
                 WHERE dp.is_active = true 
-                AND (dp.is_expired = false OR dp.is_expired IS NULL)
                 AND (now() AT TIME ZONE 'Africa/Tunis') BETWEEN dp.valid_from AND dp.valid_until
             ) dp ON dp.vehicle_id = q.vehicle_id
             WHERE q.destination_id = $1 AND q.sub_route = $2
@@ -490,7 +490,6 @@ func (r *RepositoryImpl) ListQueue(ctx context.Context, destinationID string, su
                     ) as has_trips_today
                 FROM day_passes dp
                 WHERE dp.is_active = true 
-                AND (dp.is_expired = false OR dp.is_expired IS NULL)
                 AND (now() AT TIME ZONE 'Africa/Tunis') BETWEEN dp.valid_from AND dp.valid_until
             ) dp ON dp.vehicle_id = q.vehicle_id
             WHERE q.destination_id = $1
@@ -558,7 +557,6 @@ func (r *RepositoryImpl) AddQueueEntry(ctx context.Context, req AddQueueEntryReq
 		FROM day_passes dp
 		WHERE dp.vehicle_id = $1
 		  AND dp.is_active = true
-		  AND (dp.is_expired = false OR dp.is_expired IS NULL)
 		  AND (now() AT TIME ZONE 'Africa/Tunis') BETWEEN dp.valid_from AND dp.valid_until
 		ORDER BY dp.purchase_date DESC
 		LIMIT 1`, req.VehicleID).Scan(
@@ -583,13 +581,13 @@ func (r *RepositoryImpl) AddQueueEntry(ctx context.Context, req AddQueueEntryReq
 		_, err := tx.Exec(ctx, `
             INSERT INTO day_passes (
                 id, vehicle_id, license_plate, price, purchase_date,
-                valid_from, valid_until, is_active, is_expired, created_by, created_at, updated_at
+                valid_from, valid_until, is_active, created_by, created_at, updated_at
             ) VALUES (
                 $1, $2, $3, 2.0,
                 (now() AT TIME ZONE 'Africa/Tunis'),
                 date_trunc('day', (now() AT TIME ZONE 'Africa/Tunis')),
                 (date_trunc('day', (now() AT TIME ZONE 'Africa/Tunis')) + interval '1 day' - interval '1 second'),
-                true, false, $4,
+                true, $4,
                 (now() AT TIME ZONE 'Africa/Tunis'),
                 (now() AT TIME ZONE 'Africa/Tunis')
             )`, newDayPassID, req.VehicleID, lp, req.CreatedBy)
@@ -674,7 +672,6 @@ func (r *RepositoryImpl) GetVehicleDayPass(ctx context.Context, vehicleID string
 		FROM day_passes dp
 		WHERE dp.vehicle_id = $1
 		  AND dp.is_active = true
-		  AND (dp.is_expired = false OR dp.is_expired IS NULL)
 		  AND (now() AT TIME ZONE 'Africa/Tunis') BETWEEN dp.valid_from AND dp.valid_until
 		ORDER BY dp.purchase_date DESC
 		LIMIT 1`, vehicleID).Scan(
@@ -932,7 +929,7 @@ func (r *RepositoryImpl) ListDayPasses(ctx context.Context, limit int) ([]DayPas
 		limit = 50
 	}
 	rows, err := r.db.Query(ctx, `
-        SELECT id, vehicle_id, license_plate, price, purchase_date, valid_from, valid_until, is_active, is_expired, created_by
+		SELECT id, vehicle_id, license_plate, price, purchase_date, valid_from, valid_until, is_active, false AS is_expired, created_by
         FROM day_passes ORDER BY purchase_date DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
@@ -957,14 +954,36 @@ func (r *RepositoryImpl) ExpireDayPassesAndClearRegularQueues(ctx context.Contex
 	defer tx.Rollback(ctx)
 
 	// Mark expired day passes first.
-	dayPassCT, err := tx.Exec(ctx, `
-		UPDATE day_passes
-		SET is_active = false,
-		    is_expired = true,
-		    updated_at = (now() AT TIME ZONE 'Africa/Tunis')
-		WHERE is_active = true
-		  AND (is_expired = false OR is_expired IS NULL)
-		  AND valid_until < (now() AT TIME ZONE 'Africa/Tunis')`)
+	var hasIsExpired bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM information_schema.columns
+			WHERE table_schema = 'public'
+			  AND table_name = 'day_passes'
+			  AND column_name = 'is_expired'
+		)`).Scan(&hasIsExpired); err != nil {
+		return 0, 0, err
+	}
+
+	var dayPassCT pgconn.CommandTag
+	if hasIsExpired {
+		dayPassCT, err = tx.Exec(ctx, `
+			UPDATE day_passes
+			SET is_active = false,
+			    is_expired = true,
+			    updated_at = (now() AT TIME ZONE 'Africa/Tunis')
+			WHERE is_active = true
+			  AND (is_expired = false OR is_expired IS NULL)
+			  AND valid_until < (now() AT TIME ZONE 'Africa/Tunis')`)
+	} else {
+		dayPassCT, err = tx.Exec(ctx, `
+			UPDATE day_passes
+			SET is_active = false,
+			    updated_at = (now() AT TIME ZONE 'Africa/Tunis')
+			WHERE is_active = true
+			  AND valid_until < (now() AT TIME ZONE 'Africa/Tunis')`)
+	}
 	if err != nil {
 		return 0, 0, err
 	}
