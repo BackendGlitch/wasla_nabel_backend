@@ -36,6 +36,7 @@ type InitDest struct {
 	ID        string  `json:"id"`
 	Name      string  `json:"name"`
 	BasePrice float64 `json:"basePrice"`
+	ServiceFee float64 `json:"serviceFee"`
 }
 
 type InitHandler struct {
@@ -68,7 +69,7 @@ func (h *InitHandler) GetInit(c *gin.Context) {
 	}
 
 	rows, err := h.db.Query(ctx, `
-		SELECT station_id, station_name, base_price
+		SELECT station_id, station_name, base_price, COALESCE(service_fee, 0.200)
 		FROM routes
 		WHERE is_active = true
 		ORDER BY station_name`)
@@ -76,7 +77,7 @@ func (h *InitHandler) GetInit(c *gin.Context) {
 		defer rows.Close()
 		for rows.Next() {
 			var d InitDest
-			if err := rows.Scan(&d.ID, &d.Name, &d.BasePrice); err == nil {
+			if err := rows.Scan(&d.ID, &d.Name, &d.BasePrice, &d.ServiceFee); err == nil {
 				resp.Destinations = append(resp.Destinations, d)
 			}
 		}
