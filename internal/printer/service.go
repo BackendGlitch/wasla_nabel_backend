@@ -645,9 +645,10 @@ func resolveServiceFeePerSeat(data *TicketData) float64 {
 func (s *Service) generateBookingTicketContent(data *TicketData) string {
 	var content strings.Builder
 	content.WriteString("{{CENTER_SMALL:BILLET CLIENT}}\n")
+	content.WriteString(fmt.Sprintf("{{CENTER_SMALL:%s}}\n", strings.ToUpper(companyNameForTicket(data))))
 	content.WriteString("------------------------------\n")
 	content.WriteString(fmt.Sprintf("Dir: %s\n", data.DestinationName))
-	content.WriteString(fmt.Sprintf("Voit: %s\n", data.LicensePlate))
+	content.WriteString(fmt.Sprintf("Voit: %s\n", strings.TrimSpace(data.LicensePlate)))
 	content.WriteString(fmt.Sprintf("Siege: %d\n", data.SeatNumber))
 
 	if data.BasePrice > 0 {
@@ -666,12 +667,15 @@ func (s *Service) generateBookingTicketContent(data *TicketData) string {
 	}
 	content.WriteString(fmt.Sprintf("Heure: %s\n", data.CreatedAt.Format("15:04")))
 	content.WriteString("------------------------------\n")
+	// Extra feed so the partial cut happens after the main block is fully past the print head.
+	content.WriteString("{{FEED_BEFORE_CUT}}\n")
 	content.WriteString("{{PARTIAL_CUT}}\n")
 
 	// Small attached talon for the driver (same ticket index + minimal essentials).
+	content.WriteString(fmt.Sprintf("{{CENTER_SMALL:%s}}\n", strings.ToUpper(companyNameForTicket(data))))
 	content.WriteString("{{CENTER_SMALL:TALON}}\n")
 	content.WriteString(fmt.Sprintf("N: %d\n", data.SeatNumber))
-	content.WriteString(fmt.Sprintf("V: %s\n", data.LicensePlate))
+	content.WriteString(fmt.Sprintf("V: %s\n", strings.TrimSpace(data.LicensePlate)))
 	content.WriteString(fmt.Sprintf("D: %s\n", data.DestinationName))
 	content.WriteString(fmt.Sprintf("H: %s\n", data.CreatedAt.Format("15:04")))
 	content.WriteString("------------------------------\n\n")
@@ -933,8 +937,20 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 			continue
 		}
 
+		// Blank feed before cutters so blades never intersect the last inked line / wrap line.
+		if line == "{{FEED_BEFORE_CUT}}" {
+			for range 4 {
+				buffer.WriteByte(0x0A)
+			}
+			resetStyle()
+			continue
+		}
+
 		// Cut marker between printed blocks.
 		if line == "{{PARTIAL_CUT}}" {
+			for range 2 {
+				buffer.WriteByte(0x0A)
+			}
 			buffer.WriteByte(0x1D) // GS
 			buffer.WriteByte(0x56) // V
 			buffer.WriteByte(0x01) // partial cut
@@ -1012,9 +1028,10 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 
 	resetStyle()
 
-	// Add extra line feeds before cutting to ensure all content is printed
-	buffer.WriteByte(0x0A) // Line feed
-	buffer.WriteByte(0x0A) // Line feed
+	// Extra feeds before final cut so ticket/talon tails (e.g. long LP) exit the cutter cleanly.
+	for range 6 {
+		buffer.WriteByte(0x0A)
+	}
 
 	// Cut paper
 	buffer.WriteByte(0x1D) // GS
