@@ -388,6 +388,13 @@ func (r *RepositoryImpl) CreateBookingByDestination(ctx context.Context, req Cre
 	b.VehicleID = vehicleID
 	b.LicensePlate = licensePlate
 	b.SeatsBooked = req.Seats
+	// Seat index is per-car and derived from occupancy (booked vs free seats).
+	// availableSeats here is after this booking deduction.
+	seatStart := (totalSeats - availableSeats) - req.Seats + 1
+	if seatStart < 1 {
+		seatStart = 1
+	}
+	b.SeatNumber = seatStart
 	seatPrice := pricePerSeat + serviceFeePerSeat // base + per-destination service fee
 	b.TotalAmount = float64(req.Seats) * seatPrice
 	b.BookingStatus = "ACTIVE"
@@ -400,16 +407,16 @@ func (r *RepositoryImpl) CreateBookingByDestination(ctx context.Context, req Cre
 	for attempt := 0; attempt < verificationAttempts; attempt++ {
 		row = tx.QueryRow(ctx, `
 			INSERT INTO bookings (
-				id, queue_id, destination_id, seats_booked, total_amount, booking_source, booking_type,
+				id, queue_id, destination_id, seats_booked, seat_number, total_amount, booking_source, booking_type,
 				booking_status, payment_status, payment_method, verification_code,
 				is_verified, created_by, idempotency_key
 			) VALUES (
 				substr(md5(random()::text || clock_timestamp()::text),1,24),
-				$1, $6, $2, $3, 'CASH_STATION', 'CASH', 'ACTIVE', 'PAID', 'CASH',
-				LPAD(CAST(FLOOR(random()*1000000) AS TEXT), 6, '0'), false, $4, $5
+				$1, $7, $2, $3, $4, 'CASH_STATION', 'CASH', 'ACTIVE', 'PAID', 'CASH',
+				LPAD(CAST(FLOOR(random()*1000000) AS TEXT), 6, '0'), false, $5, $6
 			)
 			ON CONFLICT (verification_code) DO NOTHING
-			RETURNING id, verification_code, created_at`, queueID, req.Seats, float64(req.Seats)*seatPrice, req.StaffID, nullableText(req.IdempotencyKey), req.DestinationID)
+			RETURNING id, verification_code, created_at`, queueID, req.Seats, b.SeatNumber, float64(req.Seats)*seatPrice, req.StaffID, nullableText(req.IdempotencyKey), req.DestinationID)
 
 		if err := row.Scan(&b.ID, &b.VerificationCode, &b.CreatedAt); err != nil {
 			if err == pgx.ErrNoRows {
@@ -526,12 +533,12 @@ func (r *RepositoryImpl) CancelOneBookingByQueueEntry(ctx context.Context, queue
 // ListQueueSnapshot returns the current queue for a destination (minimal columns for UI refresh)
 func (r *RepositoryImpl) ListQueueSnapshot(ctx context.Context, destinationID string) ([]QueueEntry, error) {
 	rows, err := r.db.Query(ctx, `
-        SELECT q.id, q.vehicle_id, v.license_plate, q.destination_id, q.destination_name,
+        SELECT q.id, q.vehicle_id, COALESCE(NULLIF(v.license_plate, ''), NULLIF(q.license_plate, ''), '[UNKNOWN]'), q.destination_id, q.destination_name,
                q.sub_route, q.sub_route_name, q.queue_type, q.queue_position, q.status,
                q.entered_at, q.available_seats, q.total_seats, q.base_price,
                q.estimated_departure, q.actual_departure
         FROM vehicle_queue q
-        JOIN vehicles v ON v.id = q.vehicle_id
+        LEFT JOIN vehicles v ON v.id = q.vehicle_id
         WHERE q.destination_id = $1
         ORDER BY q.queue_position ASC`, destinationID)
 	if err != nil {
@@ -566,9 +573,25 @@ func (r *RepositoryImpl) ListTrips(ctx context.Context, limit int) ([]Trip, erro
 		limit = 50
 	}
 	rows, err := r.db.Query(ctx, `
-        SELECT id, vehicle_id, license_plate, destination_id, destination_name, queue_id, seats_booked,
-               vehicle_capacity, base_price, start_time, created_at
-        FROM trips ORDER BY start_time DESC LIMIT $1`, limit)
+        SELECT
+            t.id,
+            COALESCE(to_jsonb(t)->>'vehicle_id', '') AS vehicle_id,
+            COALESCE(NULLIF(t.license_plate, ''), '[UNKNOWN]') AS license_plate,
+            t.destination_id,
+            t.destination_name,
+            t.queue_id,
+            COALESCE(
+              NULLIF(to_jsonb(t)->>'seats_booked', '')::int,
+              NULLIF(to_jsonb(t)->>'booked_seats', '')::int,
+              0
+            ) AS seats_booked,
+            NULLIF(to_jsonb(t)->>'vehicle_capacity', '')::int AS vehicle_capacity,
+            NULLIF(to_jsonb(t)->>'base_price', '')::double precision AS base_price,
+            t.start_time,
+            t.created_at
+        FROM trips t
+        ORDER BY t.start_time DESC
+        LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -593,20 +616,48 @@ func (r *RepositoryImpl) ListTodayTrips(ctx context.Context, search string, limi
 	var err error
 	if search != "" {
 		rows, err = r.db.Query(ctx, `
-            SELECT id, vehicle_id, license_plate, destination_id, destination_name, queue_id, seats_booked,
-                   vehicle_capacity, base_price, start_time, created_at
-            FROM trips
-            WHERE start_time::date = CURRENT_DATE AND license_plate ILIKE '%' || $1 || '%'
-            ORDER BY start_time DESC
+            SELECT
+                t.id,
+                COALESCE(to_jsonb(t)->>'vehicle_id', '') AS vehicle_id,
+                COALESCE(NULLIF(t.license_plate, ''), '[UNKNOWN]') AS license_plate,
+                t.destination_id,
+                t.destination_name,
+                t.queue_id,
+                COALESCE(
+                  NULLIF(to_jsonb(t)->>'seats_booked', '')::int,
+                  NULLIF(to_jsonb(t)->>'booked_seats', '')::int,
+                  0
+                ) AS seats_booked,
+                NULLIF(to_jsonb(t)->>'vehicle_capacity', '')::int AS vehicle_capacity,
+                NULLIF(to_jsonb(t)->>'base_price', '')::double precision AS base_price,
+                t.start_time,
+                t.created_at
+            FROM trips t
+            WHERE t.start_time::date = CURRENT_DATE AND t.license_plate ILIKE '%' || $1 || '%'
+            ORDER BY t.start_time DESC
             LIMIT $2
         `, search, limit)
 	} else {
 		rows, err = r.db.Query(ctx, `
-            SELECT id, vehicle_id, license_plate, destination_id, destination_name, queue_id, seats_booked,
-                   vehicle_capacity, base_price, start_time, created_at
-            FROM trips
-            WHERE start_time::date = CURRENT_DATE
-            ORDER BY start_time DESC
+            SELECT
+                t.id,
+                COALESCE(to_jsonb(t)->>'vehicle_id', '') AS vehicle_id,
+                COALESCE(NULLIF(t.license_plate, ''), '[UNKNOWN]') AS license_plate,
+                t.destination_id,
+                t.destination_name,
+                t.queue_id,
+                COALESCE(
+                  NULLIF(to_jsonb(t)->>'seats_booked', '')::int,
+                  NULLIF(to_jsonb(t)->>'booked_seats', '')::int,
+                  0
+                ) AS seats_booked,
+                NULLIF(to_jsonb(t)->>'vehicle_capacity', '')::int AS vehicle_capacity,
+                NULLIF(to_jsonb(t)->>'base_price', '')::double precision AS base_price,
+                t.start_time,
+                t.created_at
+            FROM trips t
+            WHERE t.start_time::date = CURRENT_DATE
+            ORDER BY t.start_time DESC
             LIMIT $1
         `, limit)
 	}
@@ -775,14 +826,11 @@ func (r *RepositoryImpl) CreateBookingByQueueEntry(ctx context.Context, req Crea
 		fmt.Printf("DEBUG: Vehicle not fully booked yet - available seats: %d\n", newAvailableSeats)
 	}
 
-	// Get the next available seat numbers for this queue based on existing bookings
-	var nextSeatNumber int
-	err = tx.QueryRow(ctx, `
-		SELECT COUNT(*) + 1 
-		FROM bookings 
-		WHERE queue_id = $1 AND booking_status = 'ACTIVE'`, queueID).Scan(&nextSeatNumber)
-	if err != nil {
-		nextSeatNumber = 1 // Start from 1 if no bookings exist
+	// Seat numbering per car is derived from occupancy (booked vs free seats),
+	// not from booking row count, so it stays consistent per vehicle lifecycle.
+	nextSeatNumber := (totalSeats - newAvailableSeats) - req.Seats + 1
+	if nextSeatNumber < 1 {
+		nextSeatNumber = 1
 	}
 
 	// Create individual bookings for each seat

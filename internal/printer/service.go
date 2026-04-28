@@ -644,23 +644,13 @@ func resolveServiceFeePerSeat(data *TicketData) float64 {
 // Generate ticket content methods
 func (s *Service) generateBookingTicketContent(data *TicketData) string {
 	var content strings.Builder
+	content.WriteString("{{CENTER_SMALL:BILLET CLIENT}}\n")
+	content.WriteString("------------------------------\n")
+	content.WriteString(fmt.Sprintf("Dir: %s\n", data.DestinationName))
+	content.WriteString(fmt.Sprintf("Voit: %s\n", data.LicensePlate))
+	content.WriteString(fmt.Sprintf("Siege: %d\n", data.SeatNumber))
 
-	content.WriteString(logoMarkerForTicket(data) + "\n")
-	content.WriteString(fmt.Sprintf("{{CENTER_SMALL:%s}}\n", strings.ToUpper(companyNameForTicket(data))))
-	content.WriteString("================================\n")
-
-	// Compact ticket title
-	content.WriteString("     BILLET DE RÉSERVATION\n")
-	content.WriteString("--------------------------------\n")
-
-	// Essential information in compact format
-	content.WriteString(fmt.Sprintf("Vehicule: %s\n", data.LicensePlate))
-	content.WriteString(fmt.Sprintf("Destination: %s\n", data.DestinationName))
-	content.WriteString(fmt.Sprintf("Siège: %d\n", data.SeatNumber))
-
-	// Detailed pricing breakdown
 	if data.BasePrice > 0 {
-		// SeatNumber is an index label, not a quantity; pricing is for one ticket here.
 		fee := resolveServiceFeePerSeat(data)
 		baseLine := data.BasePrice
 		if data.TotalAmount > 0 && data.BasePrice <= 0 {
@@ -669,23 +659,22 @@ func (s *Service) generateBookingTicketContent(data *TicketData) string {
 				baseLine = 0
 			}
 		}
-		totalLine := baseLine + fee
-
-		content.WriteString(fmt.Sprintf("Prix de base: %.2f TND\n", baseLine))
-		content.WriteString(fmt.Sprintf("Frais de services: %.2f TND\n", fee))
-		content.WriteString(fmt.Sprintf("Total: %.2f TND\n", totalLine))
+		content.WriteString(fmt.Sprintf("Base: %.2f  Frais: %.2f\n", baseLine, fee))
+		content.WriteString(fmt.Sprintf("TOTAL: %.2f TND\n", baseLine+fee))
 	} else {
-		content.WriteString(fmt.Sprintf("Montant: %.2f TND\n", data.TotalAmount))
+		content.WriteString(fmt.Sprintf("TOTAL: %.2f TND\n", data.TotalAmount))
 	}
+	content.WriteString(fmt.Sprintf("Heure: %s\n", data.CreatedAt.Format("15:04")))
+	content.WriteString("------------------------------\n")
+	content.WriteString("{{PARTIAL_CUT}}\n")
 
-	content.WriteString(fmt.Sprintf("Date: %s\n", data.CreatedAt.Format("02/01/2006 15:04")))
-	content.WriteString(fmt.Sprintf("Agent: %s\n", agentLineForTicket(data)))
-
-	// Compact footer
-	content.WriteString("--------------------------------\n")
-	content.WriteString("Merci de nous avoir choisis!\n")
-
-	content.WriteString("\n\n")
+	// Small attached talon for the driver (same ticket index + minimal essentials).
+	content.WriteString("{{CENTER_SMALL:TALON}}\n")
+	content.WriteString(fmt.Sprintf("N: %d\n", data.SeatNumber))
+	content.WriteString(fmt.Sprintf("V: %s\n", data.LicensePlate))
+	content.WriteString(fmt.Sprintf("D: %s\n", data.DestinationName))
+	content.WriteString(fmt.Sprintf("H: %s\n", data.CreatedAt.Format("15:04")))
+	content.WriteString("------------------------------\n\n")
 
 	return content.String()
 }
@@ -867,38 +856,12 @@ func (s *Service) generateExitPassTicketContent(data *TicketData) string {
 
 func (s *Service) generateTalonContent(data *TicketData) string {
 	var content strings.Builder
-
-	content.WriteString(logoMarkerForTicket(data) + "\n")
-	content.WriteString(fmt.Sprintf("{{CENTER_SMALL:%s}}\n", strings.ToUpper(companyNameForTicket(data))))
-	content.WriteString("================================\n")
-	content.WriteString(fmt.Sprintf("Vehicule: %s\n", data.LicensePlate))
-	if data.DestinationName != "" {
-		content.WriteString(fmt.Sprintf("Destination: %s\n", data.DestinationName))
-	}
-	content.WriteString("--------------------------------\n")
-	content.WriteString("INDEX SIEGE:\n")
-	content.WriteString(fmt.Sprintf("{{BIG_INDEX:%d}}\n", data.SeatNumber))
-	content.WriteString("--------------------------------\n")
-	if data.BasePrice > 0 {
-		// Talon is one seat per ticket; SeatNumber is only the printed index.
-		fee := resolveServiceFeePerSeat(data)
-		baseLine := data.BasePrice
-		if data.TotalAmount > 0 && data.BasePrice <= 0 {
-			baseLine = data.TotalAmount - fee
-			if baseLine < 0 {
-				baseLine = 0
-			}
-		}
-		totalLine := baseLine + fee
-		content.WriteString(fmt.Sprintf("Prix de base: %.2f TND\n", baseLine))
-		content.WriteString(fmt.Sprintf("Frais de services: %.2f TND\n", fee))
-		content.WriteString(fmt.Sprintf("Total: %.2f TND\n", totalLine))
-	} else {
-		content.WriteString(fmt.Sprintf("Montant: %.2f TND\n", data.TotalAmount))
-	}
-	content.WriteString(fmt.Sprintf("Heure: %s\n", data.CreatedAt.Format("02/01/2006 15:04")))
-	content.WriteString(fmt.Sprintf("Agent: %s\n", agentLineForTicket(data)))
-	content.WriteString("================================\n\n")
+	content.WriteString("{{CENTER_SMALL:TALON}}\n")
+	content.WriteString(fmt.Sprintf("N: %d\n", data.SeatNumber))
+	content.WriteString(fmt.Sprintf("V: %s\n", data.LicensePlate))
+	content.WriteString(fmt.Sprintf("D: %s\n", data.DestinationName))
+	content.WriteString(fmt.Sprintf("H: %s\n", data.CreatedAt.Format("15:04")))
+	content.WriteString("------------------------------\n\n")
 
 	return content.String()
 }
@@ -986,6 +949,24 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 			setTextScale(0x22)
 			buffer.WriteString(value)
 			buffer.WriteByte(0x0A) // Line feed
+			resetStyle()
+			continue
+		}
+
+		// Cut marker between printed blocks.
+		if line == "{{PARTIAL_CUT}}" {
+			buffer.WriteByte(0x1D) // GS
+			buffer.WriteByte(0x56) // V
+			buffer.WriteByte(0x01) // partial cut
+			buffer.WriteByte(0x0A)
+			resetStyle()
+			continue
+		}
+		if line == "{{FULL_CUT}}" {
+			buffer.WriteByte(0x1D) // GS
+			buffer.WriteByte(0x56) // V
+			buffer.WriteByte(0x00) // full cut
+			buffer.WriteByte(0x0A)
 			resetStyle()
 			continue
 		}
