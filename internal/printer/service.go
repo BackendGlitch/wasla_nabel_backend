@@ -682,10 +682,6 @@ func (s *Service) generateBookingTicketContent(data *TicketData) string {
 func (s *Service) generateEntryTicketContent(data *TicketData) string {
 	var content strings.Builder
 
-	content.WriteString(logoMarkerForTicket(data) + "\n")
-	content.WriteString(fmt.Sprintf("{{CENTER_SMALL:%s}}\n", strings.ToUpper(companyNameForTicket(data))))
-	content.WriteString("================================\n")
-
 	// Compact ticket title
 	content.WriteString("        BILLET D'ENTRÉE\n")
 	content.WriteString("--------------------------------\n")
@@ -706,10 +702,6 @@ func (s *Service) generateEntryTicketContent(data *TicketData) string {
 
 func (s *Service) generateExitTicketContent(data *TicketData) string {
 	var content strings.Builder
-
-	content.WriteString(logoMarkerForTicket(data) + "\n")
-	content.WriteString(fmt.Sprintf("{{CENTER_SMALL:%s}}\n", strings.ToUpper(companyNameForTicket(data))))
-	content.WriteString("================================\n")
 
 	// Compact ticket title
 	content.WriteString("        BILLET DE SORTIE\n")
@@ -732,10 +724,6 @@ func (s *Service) generateExitTicketContent(data *TicketData) string {
 
 func (s *Service) generateDayPassTicketContent(data *TicketData) string {
 	var content strings.Builder
-
-	content.WriteString(logoMarkerForTicket(data) + "\n")
-	content.WriteString(fmt.Sprintf("{{CENTER_SMALL:%s}}\n", strings.ToUpper(companyNameForTicket(data))))
-	content.WriteString("================================\n")
 
 	// Compact ticket title
 	content.WriteString("      BILLET PASS JOURNÉE\n")
@@ -784,10 +772,6 @@ func (s *Service) generateDayPassTicketContent(data *TicketData) string {
 
 func (s *Service) generateExitPassTicketContent(data *TicketData) string {
 	var content strings.Builder
-
-	content.WriteString(logoMarkerForTicket(data) + "\n")
-	content.WriteString(fmt.Sprintf("{{CENTER_SMALL:%s}}\n", strings.ToUpper(companyNameForTicket(data))))
-	content.WriteString("================================\n")
 
 	// Compact ticket title with exit pass count in top right
 	content.WriteString("   🚪 BILLET AUTORISATION SORTIE")
@@ -868,10 +852,6 @@ func (s *Service) generateTalonContent(data *TicketData) string {
 
 func (s *Service) generateStandardTicketContent(data *TicketData) string {
 	var content strings.Builder
-
-	content.WriteString(logoMarkerForTicket(data) + "\n")
-	content.WriteString(fmt.Sprintf("{{CENTER_SMALL:%s}}\n", strings.ToUpper(companyNameForTicket(data))))
-	content.WriteString("================================\n")
 
 	// Compact ticket title
 	content.WriteString("        BILLET STANDARD\n")
