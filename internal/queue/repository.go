@@ -786,19 +786,19 @@ func (r *RepositoryImpl) ClearAllQueues(ctx context.Context) error {
 // CreateTripFromExit inserts a trip row when a vehicle exits via print&remove
 func (r *RepositoryImpl) CreateTripFromExit(ctx context.Context, queueEntryID string, licensePlate string, destinationName string, seatsBooked int, totalSeats int, basePrice float64) (string, error) {
 	tripID := fmt.Sprintf("trip_%d", time.Now().UnixNano())
-	// Look up queue entry details to populate vehicle_id and destination_id
-	var vehicleID, destinationID string
-	if err := r.db.QueryRow(ctx, `SELECT vehicle_id, destination_id FROM vehicle_queue WHERE id=$1`, queueEntryID).Scan(&vehicleID, &destinationID); err != nil {
+	// Look up queue entry details from queue row.
+	var destinationID string
+	if err := r.db.QueryRow(ctx, `SELECT destination_id FROM vehicle_queue WHERE id=$1`, queueEntryID).Scan(&destinationID); err != nil {
 		return "", err
 	}
 	// Insert into trips
 	if _, err := r.db.Exec(ctx, `
         INSERT INTO trips (
-            id, vehicle_id, license_plate, destination_id, destination_name, queue_id, seats_booked,
-            vehicle_capacity, base_price, start_time, created_at
+            id, queue_id, destination_id, destination_name, license_plate,
+            start_time, created_at, total_seats, booked_seats, created_by
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW()
-        )`, tripID, vehicleID, licensePlate, destinationID, destinationName, queueEntryID, seatsBooked, totalSeats, basePrice); err != nil {
+            $1, $2, $3, $4, $5, NOW(), NOW(), $6, $7, $8
+        )`, tripID, queueEntryID, destinationID, destinationName, licensePlate, totalSeats, seatsBooked, "system"); err != nil {
 		return "", err
 	}
 	return tripID, nil

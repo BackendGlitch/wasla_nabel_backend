@@ -374,11 +374,12 @@ func (r *RepositoryImpl) CreateBookingByDestination(ctx context.Context, req Cre
 		seatsForTrip := totalSeats
 		if _, err := tx.Exec(ctx, `
             INSERT INTO trips (
-                id, vehicle_id, license_plate, destination_id, destination_name, queue_id, seats_booked, start_time, created_at
+                id, queue_id, destination_id, destination_name, license_plate,
+                start_time, created_at, total_seats, booked_seats, created_by
             ) VALUES (
                 substr(md5(random()::text || clock_timestamp()::text),1,24),
-                $1, $2, $3, $4, $5, $6, NOW(), NOW()
-            )`, vehicleID, licensePlate, destID, destName, queueID, seatsForTrip); err != nil {
+                $1, $2, $3, $4, NOW(), NOW(), $5, $6, $7
+            )`, queueID, destID, destName, licensePlate, totalSeats, seatsForTrip, req.StaffID); err != nil {
 			return nil, err
 		}
 	}
@@ -739,11 +740,11 @@ func (r *RepositoryImpl) CreateBookingByQueueEntry(ctx context.Context, req Crea
 		fmt.Printf("DEBUG: Inserting trip record with ID: %s, Vehicle: %s, Destination: %s\n", tripID, licensePlate, destName)
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO trips (
-				id, vehicle_id, license_plate, destination_id, destination_name, queue_id, seats_booked, 
-				vehicle_capacity, base_price, start_time, created_at
+				id, queue_id, destination_id, destination_name, license_plate,
+				start_time, created_at, total_seats, booked_seats, created_by
 			) VALUES (
-				$1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW()
-			)`, tripID, vehicleID, licensePlate, destID, destName, queueID, totalSeats, totalSeats, basePrice); err != nil {
+				$1, $2, $3, $4, $5, NOW(), NOW(), $6, $7, $8
+			)`, tripID, queueID, destID, destName, licensePlate, totalSeats, totalSeats, req.StaffID); err != nil {
 			fmt.Printf("DEBUG: Error creating trip record: %v\n", err)
 			return nil, err
 		}
