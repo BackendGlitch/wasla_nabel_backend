@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"image/png"
 	"math"
+	"strconv"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -464,18 +465,35 @@ func looksLikeInternalID(s string) bool {
 	return false
 }
 
+// looksLikeTechnicalStaffLoginLabel matches API/JWT quirks where booking.createdByName
+// holds a supervisor username like "staff_supervisor_001" instead of a person's name.
+func looksLikeTechnicalStaffLoginLabel(s string) bool {
+	s = strings.TrimSpace(strings.ToLower(s))
+	if s == "" {
+		return false
+	}
+	if strings.Contains(s, "staff_supervisor") {
+		return true
+	}
+	if strings.HasPrefix(s, "staff_") && !strings.Contains(s, " ") {
+		return true
+	}
+	return false
+}
+
 // agentLineForTicket prints one "Agent:" line. Prefer first+last; then createdByName; never show raw ids.
 func agentLineForTicket(d *TicketData) string {
 	first := strings.TrimSpace(d.StaffFirstName)
 	last := strings.TrimSpace(d.StaffLastName)
-	if first != "" || last != "" {
-		return strings.TrimSpace(first + " " + last)
+	fromNames := strings.TrimSpace(first + " " + last)
+	if fromNames != "" {
+		return fromNames
 	}
-	if n := strings.TrimSpace(d.CreatedByName); n != "" && !looksLikeInternalID(n) {
+	if n := strings.TrimSpace(d.CreatedByName); n != "" && !looksLikeInternalID(n) && !looksLikeTechnicalStaffLoginLabel(n) {
 		return n
 	}
 	by := strings.TrimSpace(d.CreatedBy)
-	if by != "" && !looksLikeInternalID(by) {
+	if by != "" && !looksLikeInternalID(by) && !looksLikeTechnicalStaffLoginLabel(by) {
 		return by
 	}
 	if by != "" && looksLikeInternalID(by) {
@@ -708,10 +726,10 @@ func (s *Service) generateBookingTicketContent(data *TicketData) string {
 	content.WriteString("{{FEED_BEFORE_CUT}}\n")
 	content.WriteString("{{PARTIAL_CUT}}\n")
 
-	// Visibly smaller talon block to clearly distinguish it from the client ticket.
-	content.WriteString("{{TALON_COMPACT_ON}}\n")
+	// Seat first (above talon divider), then divider, then LP + footer (compact spacing).
+	content.WriteString(fmt.Sprintf("{{TALON_SEAT_PROMINENT:%d}}\n", data.SeatNumber))
 	content.WriteString("------------------------------\n")
-	content.WriteString(fmt.Sprintf("{{CENTER_SMALL:SIEGE: %d}}\n", data.SeatNumber))
+	content.WriteString("{{TALON_COMPACT_ON}}\n")
 	content.WriteString(fmt.Sprintf("{{TALON_LP_BIG:%s}}\n", strings.TrimSpace(data.LicensePlate)))
 	content.WriteString(fmt.Sprintf("Agent: %s\n", agentLineForTicket(data)))
 	content.WriteString(fmt.Sprintf("{{TALON_BOTTOM_ROW:%s|%s}}\n", data.CreatedAt.Format("15:04"), data.DestinationName))
@@ -874,9 +892,9 @@ func (s *Service) generateExitPassTicketContent(data *TicketData) string {
 
 func (s *Service) generateTalonContent(data *TicketData) string {
 	var content strings.Builder
-	content.WriteString("{{TALON_COMPACT_ON}}\n")
+	content.WriteString(fmt.Sprintf("{{TALON_SEAT_PROMINENT:%d}}\n", data.SeatNumber))
 	content.WriteString("------------------------------\n")
-	content.WriteString(fmt.Sprintf("{{CENTER_SMALL:SIEGE: %d}}\n", data.SeatNumber))
+	content.WriteString("{{TALON_COMPACT_ON}}\n")
 	content.WriteString(fmt.Sprintf("{{TALON_LP_BIG:%s}}\n", strings.TrimSpace(data.LicensePlate)))
 	content.WriteString(fmt.Sprintf("Agent: %s\n", agentLineForTicket(data)))
 	content.WriteString(fmt.Sprintf("{{TALON_BOTTOM_ROW:%s|%s}}\n", data.CreatedAt.Format("15:04"), data.DestinationName))
@@ -1049,6 +1067,23 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 			setTextScale(0x00)
 			buffer.WriteString(value)
 			buffer.WriteByte(0x0A) // Line feed
+			resetStyle()
+			continue
+		}
+		// Talon-only: prominent seat row above the dashed line (slightly enlarged, centered).
+		if strings.HasPrefix(line, "{{TALON_SEAT_PROMINENT:") && strings.HasSuffix(line, "}}") {
+			raw := strings.TrimSuffix(strings.TrimPrefix(line, "{{TALON_SEAT_PROMINENT:"), "}}")
+			n, err := strconv.Atoi(strings.TrimSpace(raw))
+			if err != nil {
+				resetStyle()
+				continue
+			}
+			resetStyle()
+			setAlign(0x01)
+			setTextStyle(0x08) // bold
+			setTextScale(0x01) // double width (visibly larger body, still below TALON_LP_BIG)
+			buffer.WriteString(fmt.Sprintf("SIEGE %d", n))
+			buffer.WriteByte(0x0A)
 			resetStyle()
 			continue
 		}
