@@ -913,6 +913,16 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 			strings.Contains(line, "RESERVATION")
 	}
 
+	isDestinationOrPlateLine := func(line string) bool {
+		return strings.HasPrefix(line, "Dir:") ||
+			strings.HasPrefix(line, "Destination:") ||
+			strings.HasPrefix(line, "Route:") ||
+			strings.HasPrefix(line, "D:") ||
+			strings.HasPrefix(line, "Voit:") ||
+			strings.HasPrefix(line, "Vehicule:") ||
+			strings.HasPrefix(line, "V:")
+	}
+
 	resetStyle()
 	isCompactTalon := false
 
@@ -952,7 +962,9 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 
 		// Blank feed before cutters so blades never intersect the last inked line / wrap line.
 		if line == "{{FEED_BEFORE_CUT}}" {
-			for range 1 {
+			// Keep enough paper advance before the inter-ticket cut so the line above
+			// (often a long license plate/destination line) is fully out of the cutter zone.
+			for range 3 {
 				buffer.WriteByte(0x0A)
 			}
 			resetStyle()
@@ -961,6 +973,8 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 
 		// Cut marker between printed blocks.
 		if line == "{{PARTIAL_CUT}}" {
+			// One extra safety feed right before cut for printers with delayed paper movement.
+			buffer.WriteByte(0x0A)
 			buffer.WriteByte(0x1D) // GS
 			buffer.WriteByte(0x56) // V
 			buffer.WriteByte(0x01) // partial cut
@@ -1014,6 +1028,11 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 		}
 
 		switch {
+		case isDestinationOrPlateLine(line):
+			// Make destination and license plate lines stand out for faster reading.
+			setAlign(0x00)
+			setTextStyle(0x08) // bold
+			setTextScale(0x01) // slightly larger (2x width, normal height)
 		case isTitleLine(line):
 			setAlign(0x01)
 			setTextStyle(0x08)
@@ -1042,8 +1061,8 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 
 	resetStyle()
 
-	// Keep one minimal feed before final cut to avoid large trailing white space.
-	for range 1 {
+	// Keep a moderate tail feed so the talon fully clears the cutter before the final cut.
+	for range 4 {
 		buffer.WriteByte(0x0A)
 	}
 
