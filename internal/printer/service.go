@@ -641,6 +641,42 @@ func resolveServiceFeePerSeat(data *TicketData) float64 {
 	return pricing.ServiceFeePerSeatTND
 }
 
+func fitRightLabel(value string, max int) string {
+	value = strings.TrimSpace(value)
+	if max <= 0 {
+		return ""
+	}
+	r := []rune(value)
+	if len(r) <= max {
+		return value
+	}
+	if max <= 1 {
+		return string(r[:max])
+	}
+	return string(r[:max-1]) + "."
+}
+
+func talonBottomRow(left, right string, width int) string {
+	left = strings.TrimSpace(left)
+	right = strings.TrimSpace(right)
+	if width <= 0 {
+		width = 32
+	}
+	if len([]rune(left)) >= width {
+		return fitRightLabel(left, width)
+	}
+	remaining := width - len([]rune(left)) - 1
+	if remaining < 1 {
+		return left
+	}
+	right = fitRightLabel(right, remaining)
+	spaces := width - len([]rune(left)) - len([]rune(right))
+	if spaces < 1 {
+		spaces = 1
+	}
+	return left + strings.Repeat(" ", spaces) + right
+}
+
 // Generate ticket content methods
 func (s *Service) generateBookingTicketContent(data *TicketData) string {
 	var content strings.Builder
@@ -666,6 +702,7 @@ func (s *Service) generateBookingTicketContent(data *TicketData) string {
 		content.WriteString(fmt.Sprintf("TOTAL: %.2f TND\n", data.TotalAmount))
 	}
 	content.WriteString(fmt.Sprintf("Heure: %s\n", data.CreatedAt.Format("15:04")))
+	content.WriteString(fmt.Sprintf("Agent: %s\n", agentLineForTicket(data)))
 	content.WriteString("------------------------------\n")
 	// Keep only a tiny safety feed before cut to avoid visible top/bottom white gaps.
 	content.WriteString("{{FEED_BEFORE_CUT}}\n")
@@ -674,11 +711,10 @@ func (s *Service) generateBookingTicketContent(data *TicketData) string {
 	// Visibly smaller talon block to clearly distinguish it from the client ticket.
 	content.WriteString("{{TALON_COMPACT_ON}}\n")
 	content.WriteString("------------------------------\n")
-	content.WriteString("{{CENTER_SMALL:MINI TALON}}\n")
-	content.WriteString(fmt.Sprintf("SIEGE: %d\n", data.SeatNumber))
-	content.WriteString(fmt.Sprintf("LP: %s\n", strings.TrimSpace(data.LicensePlate)))
-	content.WriteString(fmt.Sprintf("DEST: %s\n", data.DestinationName))
-	content.WriteString(fmt.Sprintf("HEURE: %s\n", data.CreatedAt.Format("15:04")))
+	content.WriteString(fmt.Sprintf("{{CENTER_SMALL:SIEGE: %d}}\n", data.SeatNumber))
+	content.WriteString(fmt.Sprintf("{{TALON_LP_BIG:%s}}\n", strings.TrimSpace(data.LicensePlate)))
+	content.WriteString(fmt.Sprintf("Agent: %s\n", agentLineForTicket(data)))
+	content.WriteString(fmt.Sprintf("{{TALON_BOTTOM_ROW:%s|%s}}\n", data.CreatedAt.Format("15:04"), data.DestinationName))
 	content.WriteString("------------------------------\n")
 	content.WriteString("{{TALON_COMPACT_OFF}}\n")
 
@@ -840,11 +876,10 @@ func (s *Service) generateTalonContent(data *TicketData) string {
 	var content strings.Builder
 	content.WriteString("{{TALON_COMPACT_ON}}\n")
 	content.WriteString("------------------------------\n")
-	content.WriteString("{{CENTER_SMALL:TALON}}\n")
-	content.WriteString(fmt.Sprintf("SIEGE: %d\n", data.SeatNumber))
-	content.WriteString(fmt.Sprintf("LP: %s\n", strings.TrimSpace(data.LicensePlate)))
-	content.WriteString(fmt.Sprintf("DEST: %s\n", data.DestinationName))
-	content.WriteString(fmt.Sprintf("HEURE: %s\n", data.CreatedAt.Format("15:04")))
+	content.WriteString(fmt.Sprintf("{{CENTER_SMALL:SIEGE: %d}}\n", data.SeatNumber))
+	content.WriteString(fmt.Sprintf("{{TALON_LP_BIG:%s}}\n", strings.TrimSpace(data.LicensePlate)))
+	content.WriteString(fmt.Sprintf("Agent: %s\n", agentLineForTicket(data)))
+	content.WriteString(fmt.Sprintf("{{TALON_BOTTOM_ROW:%s|%s}}\n", data.CreatedAt.Format("15:04"), data.DestinationName))
 	content.WriteString("------------------------------\n")
 	content.WriteString("{{TALON_COMPACT_OFF}}\n")
 
@@ -913,16 +948,6 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 			strings.Contains(line, "AUTORISATION") ||
 			strings.Contains(line, "STANDARD") ||
 			strings.Contains(line, "RESERVATION")
-	}
-
-	isDestinationOrPlateLine := func(line string) bool {
-		return strings.HasPrefix(line, "Dir:") ||
-			strings.HasPrefix(line, "Destination:") ||
-			strings.HasPrefix(line, "Route:") ||
-			strings.HasPrefix(line, "D:") ||
-			strings.HasPrefix(line, "Voit:") ||
-			strings.HasPrefix(line, "Vehicule:") ||
-			strings.HasPrefix(line, "V:")
 	}
 
 	resetStyle()
@@ -1027,13 +1052,38 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 			resetStyle()
 			continue
 		}
+		if strings.HasPrefix(line, "{{TALON_LP_BIG:") && strings.HasSuffix(line, "}}") {
+			value := strings.TrimSuffix(strings.TrimPrefix(line, "{{TALON_LP_BIG:"), "}}")
+			setAlign(0x01)
+			setTextStyle(0x08) // bold
+			setTextScale(0x11) // larger for plate readability
+			buffer.WriteString(value)
+			buffer.WriteByte(0x0A)
+			resetStyle()
+			if isCompactTalon {
+				buffer.Write([]byte{0x1B, 0x4D, 0x01})
+				buffer.Write([]byte{0x1B, 0x33, 18})
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "{{TALON_BOTTOM_ROW:") && strings.HasSuffix(line, "}}") {
+			raw := strings.TrimSuffix(strings.TrimPrefix(line, "{{TALON_BOTTOM_ROW:"), "}}")
+			parts := strings.SplitN(raw, "|", 2)
+			left := raw
+			right := ""
+			if len(parts) == 2 {
+				left = strings.TrimSpace(parts[0])
+				right = strings.TrimSpace(parts[1])
+			}
+			setAlign(0x00)
+			setTextStyle(0x00)
+			setTextScale(0x00)
+			buffer.WriteString(talonBottomRow(left, right, 32))
+			buffer.WriteByte(0x0A)
+			continue
+		}
 
 		switch {
-		case isDestinationOrPlateLine(line):
-			// Make destination and license plate lines stand out for faster reading.
-			setAlign(0x00)
-			setTextStyle(0x08) // bold
-			setTextScale(0x01) // slightly larger (2x width, normal height)
 		case isTitleLine(line):
 			setAlign(0x01)
 			setTextStyle(0x08)
