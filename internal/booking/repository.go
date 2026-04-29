@@ -45,39 +45,30 @@ func nullableText(v string) interface{} {
 	return v
 }
 
-// firstTripOfDayReplayTx is true when no trip was recorded yet for this vehicle on the same calendar day at or before refTime (destination-agnostic). Trips are inserted after booking rows so start_time lines up with idempotent replay.
-func firstTripOfDayReplayTx(ctx context.Context, tx pgx.Tx, vehicleID string, refTime time.Time) (bool, error) {
-	if strings.TrimSpace(vehicleID) == "" {
+// firstTripOfDayReplayTx is true when no trip row exists yet for this queue_id at or before refTime (trips are inserted after bookings).
+func firstTripOfDayReplayTx(ctx context.Context, tx pgx.Tx, queueID string, refTime time.Time) (bool, error) {
+	if strings.TrimSpace(queueID) == "" {
 		return false, nil
 	}
 	var n int
 	err := tx.QueryRow(ctx, `
 		SELECT COUNT(*)::int
 		FROM trips t
-		INNER JOIN vehicle_queue q ON q.id = t.queue_id
-		WHERE q.vehicle_id = $1
-		  AND CAST(t.start_time AS date) = CAST($2::timestamptz AS date)
+		WHERE t.queue_id = $1
 		  AND t.start_time <= $2
-	`, vehicleID, refTime).Scan(&n)
+	`, queueID, refTime).Scan(&n)
 	if err != nil {
 		return false, err
 	}
 	return n == 0, nil
 }
 
-// vehicleCompletedTripsTodayTx counts trips already started today for this vehicle (any destination).
-func vehicleCompletedTripsTodayTx(ctx context.Context, tx pgx.Tx, vehicleID string) (int, error) {
-	if strings.TrimSpace(vehicleID) == "" {
+func tripCountForQueueTx(ctx context.Context, tx pgx.Tx, queueID string) (int, error) {
+	if strings.TrimSpace(queueID) == "" {
 		return 0, nil
 	}
 	var n int
-	err := tx.QueryRow(ctx, `
-		SELECT COUNT(*)::int
-		FROM trips t
-		INNER JOIN vehicle_queue q ON q.id = t.queue_id
-		WHERE q.vehicle_id = $1
-		  AND CAST(t.start_time AS date) = CURRENT_DATE
-	`, vehicleID).Scan(&n)
+	err := tx.QueryRow(ctx, `SELECT COUNT(*)::int FROM trips WHERE queue_id = $1`, queueID).Scan(&n)
 	return n, err
 }
 
@@ -128,7 +119,7 @@ func (r *RepositoryImpl) getBookingByIdempotencyTx(ctx context.Context, tx pgx.T
 	if err != nil {
 		return nil, err
 	}
-	ft, err := firstTripOfDayReplayTx(ctx, tx, b.VehicleID, b.CreatedAt)
+	ft, err := firstTripOfDayReplayTx(ctx, tx, b.QueueID, b.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -196,13 +187,13 @@ func (r *RepositoryImpl) getBookingsByIdempotencyTx(ctx context.Context, tx pgx.
 	}
 
 	minT := bookings[0].CreatedAt
-	vid := bookings[0].VehicleID
+	qid := bookings[0].QueueID
 	for _, b := range bookings {
 		if b.CreatedAt.Before(minT) {
 			minT = b.CreatedAt
 		}
 	}
-	ft, err := firstTripOfDayReplayTx(ctx, tx, vid, minT)
+	ft, err := firstTripOfDayReplayTx(ctx, tx, qid, minT)
 	if err != nil {
 		return nil, err
 	}
@@ -417,11 +408,11 @@ func (r *RepositoryImpl) CreateBookingByDestination(ctx context.Context, req Cre
 		return nil, err
 	}
 
-	tripsToday, err := vehicleCompletedTripsTodayTx(ctx, tx, vehicleID)
+	tripsForQueue, err := tripCountForQueueTx(ctx, tx, queueID)
 	if err != nil {
 		return nil, err
 	}
-	firstTripOfDay := tripsToday == 0
+	firstTripOfDay := tripsForQueue == 0
 
 	var isReady bool
 	var destID, destName string
@@ -841,11 +832,11 @@ func (r *RepositoryImpl) CreateBookingByQueueEntry(ctx context.Context, req Crea
 		basePrice = 15.0 // Default price if not found
 	}
 
-	tripsToday, err := vehicleCompletedTripsTodayTx(ctx, tx, vehicleID)
+	tripsForQueue, err := tripCountForQueueTx(ctx, tx, queueID)
 	if err != nil {
 		return nil, err
 	}
-	firstTripOfDay := tripsToday == 0
+	firstTripOfDay := tripsForQueue == 0
 
 	fmt.Printf("DEBUG: Checking if vehicle becomes fully booked - newAvailableSeats: %d\n", newAvailableSeats)
 	if newAvailableSeats == 0 {
