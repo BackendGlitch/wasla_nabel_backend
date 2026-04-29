@@ -22,9 +22,6 @@ import (
 
 const defaultCompanyName = "FATMA ZAHRA Services Transport"
 
-// talonCompactLineSpacingDots is ESC/POS line spacing while TALON_COMPACT_ON (smaller = shorter talon height).
-const talonCompactLineSpacingDots byte = 10
-
 var (
 	defaultLogoOnce sync.Once
 	defaultLogoData []byte
@@ -741,17 +738,17 @@ func (s *Service) generateBookingTicketContent(data *TicketData) string {
 	content.WriteString("{{FEED_BEFORE_CUT}}\n")
 	content.WriteString("{{PARTIAL_CUT}}\n")
 
-	// Mini talon: compact mode first (shrinks vertical pitch), then star / seat / plate.
-	content.WriteString("{{TALON_COMPACT_ON}}\n")
+	// Seat first (above talon divider), then divider, then LP + footer (compact spacing).
 	if data.FirstTripOfDay {
 		content.WriteString("{{TALON_TOP_RIGHT_STAR}}\n")
 	}
 	content.WriteString(fmt.Sprintf("{{TALON_SEAT_PROMINENT:%d}}\n", data.SeatNumber))
-	content.WriteString("------------------------\n")
+	content.WriteString("------------------------------\n")
+	content.WriteString("{{TALON_COMPACT_ON}}\n")
 	content.WriteString(fmt.Sprintf("{{TALON_LP_BIG:%s}}\n", strings.TrimSpace(data.LicensePlate)))
 	content.WriteString(fmt.Sprintf("Agent: %s\n", agentLineForTicket(data)))
 	content.WriteString(fmt.Sprintf("{{TALON_BOTTOM_ROW:%s|%s}}\n", data.CreatedAt.Format("15:04"), data.DestinationName))
-	content.WriteString("------------------------\n")
+	content.WriteString("------------------------------\n")
 	content.WriteString("{{TALON_COMPACT_OFF}}\n")
 
 	return content.String()
@@ -910,16 +907,16 @@ func (s *Service) generateExitPassTicketContent(data *TicketData) string {
 
 func (s *Service) generateTalonContent(data *TicketData) string {
 	var content strings.Builder
-	content.WriteString("{{TALON_COMPACT_ON}}\n")
 	if data.FirstTripOfDay {
 		content.WriteString("{{TALON_TOP_RIGHT_STAR}}\n")
 	}
 	content.WriteString(fmt.Sprintf("{{TALON_SEAT_PROMINENT:%d}}\n", data.SeatNumber))
-	content.WriteString("------------------------\n")
+	content.WriteString("------------------------------\n")
+	content.WriteString("{{TALON_COMPACT_ON}}\n")
 	content.WriteString(fmt.Sprintf("{{TALON_LP_BIG:%s}}\n", strings.TrimSpace(data.LicensePlate)))
 	content.WriteString(fmt.Sprintf("Agent: %s\n", agentLineForTicket(data)))
 	content.WriteString(fmt.Sprintf("{{TALON_BOTTOM_ROW:%s|%s}}\n", data.CreatedAt.Format("15:04"), data.DestinationName))
-	content.WriteString("------------------------\n")
+	content.WriteString("------------------------------\n")
 	content.WriteString("{{TALON_COMPACT_OFF}}\n")
 
 	return content.String()
@@ -1001,21 +998,20 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 	lines := strings.Split(content, "\n")
 	for _, line := range lines {
 		if line == "{{TALON_TOP_RIGHT_STAR}}" {
+			resetStyle()
 			setAlign(0x00)
 			buffer.WriteString(talonTopRightStar(paperWidth))
 			buffer.WriteByte(0x0A)
-			if isCompactTalon {
-				buffer.Write([]byte{0x1B, 0x4D, 0x01})
-				buffer.Write([]byte{0x1B, 0x33, talonCompactLineSpacingDots})
-			}
 			continue
 		}
 
-		// Compact talon markers: smaller font + tighter line spacing for shorter talon strip.
+		// Compact talon markers: smaller font + tighter line spacing for noticeable mini talon.
 		if line == "{{TALON_COMPACT_ON}}" {
 			isCompactTalon = true
+			// ESC M 1 -> Font B (smaller)
 			buffer.Write([]byte{0x1B, 0x4D, 0x01})
-			buffer.Write([]byte{0x1B, 0x33, talonCompactLineSpacingDots})
+			// ESC 3 n -> set line spacing to n dots (smaller than default)
+			buffer.Write([]byte{0x1B, 0x33, 18})
 			continue
 		}
 		if line == "{{TALON_COMPACT_OFF}}" {
@@ -1105,7 +1101,7 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 			resetStyle()
 			continue
 		}
-		// Talon-only: prominent seat row (compact mode = Font B bold; else larger for legacy layouts).
+		// Talon-only: prominent seat row above the dashed line (slightly enlarged, centered).
 		if strings.HasPrefix(line, "{{TALON_SEAT_PROMINENT:") && strings.HasSuffix(line, "}}") {
 			raw := strings.TrimSuffix(strings.TrimPrefix(line, "{{TALON_SEAT_PROMINENT:"), "}}")
 			n, err := strconv.Atoi(strings.TrimSpace(raw))
@@ -1115,40 +1111,24 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 			}
 			resetStyle()
 			setAlign(0x01)
-			if isCompactTalon {
-				buffer.Write([]byte{0x1B, 0x4D, 0x01})
-				setTextStyle(0x08)
-				setTextScale(0x00)
-			} else {
-				setTextStyle(0x08)
-				setTextScale(0x01)
-			}
+			setTextStyle(0x08) // bold
+			setTextScale(0x01) // double width (visibly larger body, still below TALON_LP_BIG)
 			buffer.WriteString(fmt.Sprintf("SIEGE %d", n))
 			buffer.WriteByte(0x0A)
 			resetStyle()
-			if isCompactTalon {
-				buffer.Write([]byte{0x1B, 0x4D, 0x01})
-				buffer.Write([]byte{0x1B, 0x33, talonCompactLineSpacingDots})
-			}
 			continue
 		}
 		if strings.HasPrefix(line, "{{TALON_LP_BIG:") && strings.HasSuffix(line, "}}") {
 			value := strings.TrimSuffix(strings.TrimPrefix(line, "{{TALON_LP_BIG:"), "}}")
 			setAlign(0x01)
-			if isCompactTalon {
-				buffer.Write([]byte{0x1B, 0x4D, 0x01})
-				setTextStyle(0x08)
-				setTextScale(0x00)
-			} else {
-				setTextStyle(0x08)
-				setTextScale(0x11)
-			}
+			setTextStyle(0x08) // bold
+			setTextScale(0x11) // larger for plate readability
 			buffer.WriteString(value)
 			buffer.WriteByte(0x0A)
 			resetStyle()
 			if isCompactTalon {
 				buffer.Write([]byte{0x1B, 0x4D, 0x01})
-				buffer.Write([]byte{0x1B, 0x33, talonCompactLineSpacingDots})
+				buffer.Write([]byte{0x1B, 0x33, 18})
 			}
 			continue
 		}
@@ -1198,7 +1178,8 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 
 	resetStyle()
 
-	for range 2 {
+	// Keep a moderate tail feed so the talon fully clears the cutter before the final cut.
+	for range 4 {
 		buffer.WriteByte(0x0A)
 	}
 

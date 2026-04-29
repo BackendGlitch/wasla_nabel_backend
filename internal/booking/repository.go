@@ -45,30 +45,46 @@ func nullableText(v string) interface{} {
 	return v
 }
 
-// firstTripOfDayReplayTx is true when no trip row exists yet for this queue_id at or before refTime (trips are inserted after bookings).
-func firstTripOfDayReplayTx(ctx context.Context, tx pgx.Tx, queueID string, refTime time.Time) (bool, error) {
-	if strings.TrimSpace(queueID) == "" {
+// normalizeLicensePlateKey collapses casing and spaces so the same physical plate matches across queue re-entries (station 1 vs 2).
+func normalizeLicensePlateKey(lp string) string {
+	s := strings.TrimSpace(strings.ToUpper(lp))
+	return strings.ReplaceAll(s, " ", "")
+}
+
+// firstTripOfDayReplayTx uses license plate, not queue/vehicle_queue: after a vehicle leaves, its queue row is often deleted
+// and JOIN vehicle_queue would drop historical trips — same LP at another station must still count as "already had a trip today".
+func firstTripOfDayReplayTx(ctx context.Context, tx pgx.Tx, licensePlate string, refTime time.Time) (bool, error) {
+	key := normalizeLicensePlateKey(licensePlate)
+	if key == "" {
 		return false, nil
 	}
 	var n int
 	err := tx.QueryRow(ctx, `
 		SELECT COUNT(*)::int
 		FROM trips t
-		WHERE t.queue_id = $1
+		WHERE REPLACE(UPPER(TRIM(COALESCE(t.license_plate, ''))), ' ', '') = $1
+		  AND CAST(t.start_time AS date) = CAST($2::timestamptz AS date)
 		  AND t.start_time <= $2
-	`, queueID, refTime).Scan(&n)
+	`, key, refTime).Scan(&n)
 	if err != nil {
 		return false, err
 	}
 	return n == 0, nil
 }
 
-func tripCountForQueueTx(ctx context.Context, tx pgx.Tx, queueID string) (int, error) {
-	if strings.TrimSpace(queueID) == "" {
+// vehicleCompletedTripsTodayTx counts today's trips for this plate (survives queue row deletion).
+func vehicleCompletedTripsTodayTx(ctx context.Context, tx pgx.Tx, licensePlate string) (int, error) {
+	key := normalizeLicensePlateKey(licensePlate)
+	if key == "" {
 		return 0, nil
 	}
 	var n int
-	err := tx.QueryRow(ctx, `SELECT COUNT(*)::int FROM trips WHERE queue_id = $1`, queueID).Scan(&n)
+	err := tx.QueryRow(ctx, `
+		SELECT COUNT(*)::int
+		FROM trips t
+		WHERE REPLACE(UPPER(TRIM(COALESCE(t.license_plate, ''))), ' ', '') = $1
+		  AND CAST(t.start_time AS date) = CURRENT_DATE
+	`, key).Scan(&n)
 	return n, err
 }
 
@@ -119,7 +135,7 @@ func (r *RepositoryImpl) getBookingByIdempotencyTx(ctx context.Context, tx pgx.T
 	if err != nil {
 		return nil, err
 	}
-	ft, err := firstTripOfDayReplayTx(ctx, tx, b.QueueID, b.CreatedAt)
+	ft, err := firstTripOfDayReplayTx(ctx, tx, b.LicensePlate, b.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -187,13 +203,12 @@ func (r *RepositoryImpl) getBookingsByIdempotencyTx(ctx context.Context, tx pgx.
 	}
 
 	minT := bookings[0].CreatedAt
-	qid := bookings[0].QueueID
 	for _, b := range bookings {
 		if b.CreatedAt.Before(minT) {
 			minT = b.CreatedAt
 		}
 	}
-	ft, err := firstTripOfDayReplayTx(ctx, tx, qid, minT)
+	ft, err := firstTripOfDayReplayTx(ctx, tx, bookings[0].LicensePlate, minT)
 	if err != nil {
 		return nil, err
 	}
@@ -408,11 +423,11 @@ func (r *RepositoryImpl) CreateBookingByDestination(ctx context.Context, req Cre
 		return nil, err
 	}
 
-	tripsForQueue, err := tripCountForQueueTx(ctx, tx, queueID)
+	tripsToday, err := vehicleCompletedTripsTodayTx(ctx, tx, licensePlate)
 	if err != nil {
 		return nil, err
 	}
-	firstTripOfDay := tripsForQueue == 0
+	firstTripOfDay := tripsToday == 0
 
 	var isReady bool
 	var destID, destName string
@@ -832,11 +847,11 @@ func (r *RepositoryImpl) CreateBookingByQueueEntry(ctx context.Context, req Crea
 		basePrice = 15.0 // Default price if not found
 	}
 
-	tripsForQueue, err := tripCountForQueueTx(ctx, tx, queueID)
+	tripsToday, err := vehicleCompletedTripsTodayTx(ctx, tx, licensePlate)
 	if err != nil {
 		return nil, err
 	}
-	firstTripOfDay := tripsForQueue == 0
+	firstTripOfDay := tripsToday == 0
 
 	fmt.Printf("DEBUG: Checking if vehicle becomes fully booked - newAvailableSeats: %d\n", newAvailableSeats)
 	if newAvailableSeats == 0 {

@@ -64,7 +64,7 @@ type Booking struct {
 	CreatedBy        string    `json:"createdBy"`
 	CreatedByName    string    `json:"createdByName"` // Staff name instead of just ID
 	CreatedAt        time.Time `json:"createdAt"`
-	// FirstTripOfDay is true for every talon until this queue entry has a trip (vehicle full / departed). Re-queued same LP on a new queue row gets * again for that stint.
+	// FirstTripOfDay is true for every talon until this license plate has its first trips row today (any destination/queue); counting uses trips.license_plate so it still works after the queue row is deleted and the vehicle re-queues elsewhere.
 	FirstTripOfDay bool `json:"firstTripOfDay,omitempty"`
 }
 
