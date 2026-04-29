@@ -673,11 +673,12 @@ func (s *Service) generateBookingTicketContent(data *TicketData) string {
 
 	// Visibly smaller talon block to clearly distinguish it from the client ticket.
 	content.WriteString("{{TALON_COMPACT_ON}}\n")
+	content.WriteString("------------------------------\n")
 	content.WriteString("{{CENTER_SMALL:MINI TALON}}\n")
-	content.WriteString(fmt.Sprintf("N: %d\n", data.SeatNumber))
-	content.WriteString(fmt.Sprintf("V: %s\n", strings.TrimSpace(data.LicensePlate)))
-	content.WriteString(fmt.Sprintf("D: %s\n", data.DestinationName))
-	content.WriteString(fmt.Sprintf("H: %s\n", data.CreatedAt.Format("15:04")))
+	content.WriteString(fmt.Sprintf("SIEGE: %d\n", data.SeatNumber))
+	content.WriteString(fmt.Sprintf("LP: %s\n", strings.TrimSpace(data.LicensePlate)))
+	content.WriteString(fmt.Sprintf("DEST: %s\n", data.DestinationName))
+	content.WriteString(fmt.Sprintf("HEURE: %s\n", data.CreatedAt.Format("15:04")))
 	content.WriteString("------------------------------\n")
 	content.WriteString("{{TALON_COMPACT_OFF}}\n")
 
@@ -688,7 +689,7 @@ func (s *Service) generateEntryTicketContent(data *TicketData) string {
 	var content strings.Builder
 
 	// Compact ticket title
-	content.WriteString("        BILLET D'ENTRÉE\n")
+	content.WriteString("BILLET D'ENTRÉE\n")
 	content.WriteString("--------------------------------\n")
 
 	// Essential information in compact format
@@ -707,7 +708,7 @@ func (s *Service) generateExitTicketContent(data *TicketData) string {
 	var content strings.Builder
 
 	// Compact ticket title
-	content.WriteString("        BILLET DE SORTIE\n")
+	content.WriteString("BILLET DE SORTIE\n")
 	content.WriteString("--------------------------------\n")
 
 	// Essential information in compact format
@@ -727,7 +728,7 @@ func (s *Service) generateDayPassTicketContent(data *TicketData) string {
 	var content strings.Builder
 
 	// Compact ticket title
-	content.WriteString("      BILLET PASS JOURNÉE\n")
+	content.WriteString("BILLET PASS JOURNÉE\n")
 	content.WriteString("--------------------------------\n")
 
 	// Essential information in compact format
@@ -838,11 +839,12 @@ func (s *Service) generateExitPassTicketContent(data *TicketData) string {
 func (s *Service) generateTalonContent(data *TicketData) string {
 	var content strings.Builder
 	content.WriteString("{{TALON_COMPACT_ON}}\n")
+	content.WriteString("------------------------------\n")
 	content.WriteString("{{CENTER_SMALL:TALON}}\n")
-	content.WriteString(fmt.Sprintf("N: %d\n", data.SeatNumber))
-	content.WriteString(fmt.Sprintf("V: %s\n", data.LicensePlate))
-	content.WriteString(fmt.Sprintf("D: %s\n", data.DestinationName))
-	content.WriteString(fmt.Sprintf("H: %s\n", data.CreatedAt.Format("15:04")))
+	content.WriteString(fmt.Sprintf("SIEGE: %d\n", data.SeatNumber))
+	content.WriteString(fmt.Sprintf("LP: %s\n", strings.TrimSpace(data.LicensePlate)))
+	content.WriteString(fmt.Sprintf("DEST: %s\n", data.DestinationName))
+	content.WriteString(fmt.Sprintf("HEURE: %s\n", data.CreatedAt.Format("15:04")))
 	content.WriteString("------------------------------\n")
 	content.WriteString("{{TALON_COMPACT_OFF}}\n")
 
@@ -853,7 +855,7 @@ func (s *Service) generateStandardTicketContent(data *TicketData) string {
 	var content strings.Builder
 
 	// Compact ticket title
-	content.WriteString("        BILLET STANDARD\n")
+	content.WriteString("BILLET STANDARD\n")
 	content.WriteString("--------------------------------\n")
 
 	// Essential information in compact format
@@ -978,7 +980,6 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 			buffer.WriteByte(0x1D) // GS
 			buffer.WriteByte(0x56) // V
 			buffer.WriteByte(0x01) // partial cut
-			buffer.WriteByte(0x0A)
 			resetStyle()
 			continue
 		}
