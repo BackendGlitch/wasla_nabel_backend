@@ -104,7 +104,7 @@ type TicketData struct {
 	// Staff information
 	StaffFirstName string `json:"staffFirstName,omitempty"`
 	StaffLastName  string `json:"staffLastName,omitempty"`
-	// When true, talon shows a small "*" top-right (first ACTIVE booking wave for this vehicle today).
+	// When true, talon shows a small "*" top-right (vehicle has not yet completed a trip today — any destination).
 	FirstTripOfDay bool `json:"firstTripOfDay,omitempty"`
 	// Printer configuration from frontend
 	PrinterConfig *FrontendPrinterConfig `json:"printerConfig,omitempty"`

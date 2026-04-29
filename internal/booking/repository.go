@@ -45,25 +45,40 @@ func nullableText(v string) interface{} {
 	return v
 }
 
-// firstTripOfDayReplayTx is true when there is no earlier ACTIVE booking for this vehicle on the same calendar day as minCreatedAt (used for idempotent replays).
-func firstTripOfDayReplayTx(ctx context.Context, tx pgx.Tx, vehicleID string, minCreatedAt time.Time) (bool, error) {
+// firstTripOfDayReplayTx is true when no trip was recorded yet for this vehicle on the same calendar day at or before refTime (destination-agnostic). Trips are inserted after booking rows so start_time lines up with idempotent replay.
+func firstTripOfDayReplayTx(ctx context.Context, tx pgx.Tx, vehicleID string, refTime time.Time) (bool, error) {
 	if strings.TrimSpace(vehicleID) == "" {
 		return false, nil
 	}
 	var n int
 	err := tx.QueryRow(ctx, `
 		SELECT COUNT(*)::int
-		FROM bookings b
-		INNER JOIN vehicle_queue q ON q.id = b.queue_id
+		FROM trips t
+		INNER JOIN vehicle_queue q ON q.id = t.queue_id
 		WHERE q.vehicle_id = $1
-		  AND UPPER(b.booking_status) = 'ACTIVE'
-		  AND CAST(b.created_at AS date) = CAST($2::timestamptz AS date)
-		  AND b.created_at < $2
-	`, vehicleID, minCreatedAt).Scan(&n)
+		  AND CAST(t.start_time AS date) = CAST($2::timestamptz AS date)
+		  AND t.start_time <= $2
+	`, vehicleID, refTime).Scan(&n)
 	if err != nil {
 		return false, err
 	}
 	return n == 0, nil
+}
+
+// vehicleCompletedTripsTodayTx counts trips already started today for this vehicle (any destination).
+func vehicleCompletedTripsTodayTx(ctx context.Context, tx pgx.Tx, vehicleID string) (int, error) {
+	if strings.TrimSpace(vehicleID) == "" {
+		return 0, nil
+	}
+	var n int
+	err := tx.QueryRow(ctx, `
+		SELECT COUNT(*)::int
+		FROM trips t
+		INNER JOIN vehicle_queue q ON q.id = t.queue_id
+		WHERE q.vehicle_id = $1
+		  AND CAST(t.start_time AS date) = CURRENT_DATE
+	`, vehicleID).Scan(&n)
+	return n, err
 }
 
 func (r *RepositoryImpl) getBookingByIdempotencyTx(ctx context.Context, tx pgx.Tx, key string) (*Booking, error) {
@@ -402,19 +417,12 @@ func (r *RepositoryImpl) CreateBookingByDestination(ctx context.Context, req Cre
 		return nil, err
 	}
 
-	var priorToday int
-	if err := tx.QueryRow(ctx, `
-		SELECT COUNT(*)::int
-		FROM bookings b
-		INNER JOIN vehicle_queue q ON q.id = b.queue_id
-		WHERE q.vehicle_id = $1
-		  AND UPPER(b.booking_status) = 'ACTIVE'
-		  AND CAST(b.created_at AS date) = CURRENT_DATE`, vehicleID).Scan(&priorToday); err != nil {
+	tripsToday, err := vehicleCompletedTripsTodayTx(ctx, tx, vehicleID)
+	if err != nil {
 		return nil, err
 	}
-	firstTripOfDay := priorToday == 0
+	firstTripOfDay := tripsToday == 0
 
-	// If vehicle is now READY (fully booked), create a trip record (needs licensePlate)
 	var isReady bool
 	var destID, destName string
 	var totalSeats, availableSeats int
@@ -422,19 +430,6 @@ func (r *RepositoryImpl) CreateBookingByDestination(ctx context.Context, req Cre
         SELECT (available_seats = 0) AS ready, destination_id, destination_name, total_seats, available_seats
         FROM vehicle_queue WHERE id = $1`, queueID).Scan(&isReady, &destID, &destName, &totalSeats, &availableSeats); err != nil {
 		return nil, err
-	}
-	if isReady {
-		seatsForTrip := totalSeats
-		if _, err := tx.Exec(ctx, `
-            INSERT INTO trips (
-                id, queue_id, destination_id, destination_name, license_plate,
-                start_time, created_at, total_seats, booked_seats, created_by
-            ) VALUES (
-                substr(md5(random()::text || clock_timestamp()::text),1,24),
-                $1, $2, $3, $4, NOW(), NOW(), $5, $6, $7
-            )`, queueID, destID, destName, licensePlate, totalSeats, seatsForTrip, req.StaffID); err != nil {
-			return nil, err
-		}
 	}
 
 	var b Booking
@@ -485,6 +480,21 @@ func (r *RepositoryImpl) CreateBookingByDestination(ctx context.Context, req Cre
 	}
 
 	b.FirstTripOfDay = firstTripOfDay
+
+	// Trip row after booking so talon replay (firstTripOfDay) matches created_at ordering.
+	if isReady {
+		seatsForTrip := totalSeats
+		if _, err := tx.Exec(ctx, `
+            INSERT INTO trips (
+                id, queue_id, destination_id, destination_name, license_plate,
+                start_time, created_at, total_seats, booked_seats, created_by
+            ) VALUES (
+                substr(md5(random()::text || clock_timestamp()::text),1,24),
+                $1, $2, $3, $4, NOW(), NOW(), $5, $6, $7
+            )`, queueID, destID, destName, licensePlate, totalSeats, seatsForTrip, req.StaffID); err != nil {
+			return nil, err
+		}
+	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
@@ -812,13 +822,11 @@ func (r *RepositoryImpl) CreateBookingByQueueEntry(ctx context.Context, req Crea
 		return nil, err
 	}
 
-	// Check if vehicle is now READY (fully booked) after this booking
-	var isReady bool
 	var destID, destName string
 	var totalSeats, newAvailableSeats int
 	if err := tx.QueryRow(ctx, `
-		SELECT (available_seats = 0) AS ready, destination_id, destination_name, total_seats, available_seats
-		FROM vehicle_queue WHERE id = $1`, queueID).Scan(&isReady, &destID, &destName, &totalSeats, &newAvailableSeats); err != nil {
+		SELECT destination_id, destination_name, total_seats, available_seats
+		FROM vehicle_queue WHERE id = $1`, queueID).Scan(&destID, &destName, &totalSeats, &newAvailableSeats); err != nil {
 		return nil, err
 	}
 
@@ -833,50 +841,15 @@ func (r *RepositoryImpl) CreateBookingByQueueEntry(ctx context.Context, req Crea
 		basePrice = 15.0 // Default price if not found
 	}
 
-	// Check if vehicle is now fully booked after this booking
-	var exitPass *ExitPass
+	tripsToday, err := vehicleCompletedTripsTodayTx(ctx, tx, vehicleID)
+	if err != nil {
+		return nil, err
+	}
+	firstTripOfDay := tripsToday == 0
+
 	fmt.Printf("DEBUG: Checking if vehicle becomes fully booked - newAvailableSeats: %d\n", newAvailableSeats)
 	if newAvailableSeats == 0 {
-		fmt.Printf("DEBUG: Vehicle is now fully booked! Creating trip record...\n")
-		// Vehicle is now fully booked, create trip record
-		tripID := fmt.Sprintf("trip_%d", time.Now().UnixNano())
-		currentExitTime := time.Now().In(time.FixedZone("Africa/Tunis", 3600)) // Use Tunisia timezone
-
-		// Create trip record
-		fmt.Printf("DEBUG: Inserting trip record with ID: %s, Vehicle: %s, Destination: %s\n", tripID, licensePlate, destName)
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO trips (
-				id, queue_id, destination_id, destination_name, license_plate,
-				start_time, created_at, total_seats, booked_seats, created_by
-			) VALUES (
-				$1, $2, $3, $4, $5, NOW(), NOW(), $6, $7, $8
-			)`, tripID, queueID, destID, destName, licensePlate, totalSeats, totalSeats, req.StaffID); err != nil {
-			fmt.Printf("DEBUG: Error creating trip record: %v\n", err)
-			return nil, err
-		}
-		fmt.Printf("DEBUG: Trip record created successfully!\n")
-
-		// Calculate total amount (vehicle capacity * base price without service fees)
-		totalPrice := basePrice * float64(totalSeats)
-
-		// Create exit pass information for frontend
-		exitPass = &ExitPass{
-			ID:              tripID, // Use trip ID as exit pass ID
-			QueueID:         queueID,
-			VehicleID:       vehicleID,
-			LicensePlate:    licensePlate,
-			DestinationID:   destID,
-			DestinationName: destName,
-			CurrentExitTime: currentExitTime,
-			TotalPrice:      totalPrice,
-			CreatedBy:       req.StaffID,
-			CreatedByName:   staffName,
-			CreatedAt:       time.Now(),
-			// Vehicle and pricing information for ticket generation
-			VehicleCapacity: totalSeats, // Vehicle capacity
-			BasePrice:       basePrice,  // Base price per seat from route
-		}
-		fmt.Printf("DEBUG: Exit pass created for frontend\n")
+		fmt.Printf("DEBUG: Vehicle fully booked after this booking; trip/exitPass created after seats\n")
 	} else {
 		fmt.Printf("DEBUG: Vehicle not fully booked yet - available seats: %d\n", newAvailableSeats)
 	}
@@ -888,17 +861,7 @@ func (r *RepositoryImpl) CreateBookingByQueueEntry(ctx context.Context, req Crea
 		nextSeatNumber = 1
 	}
 
-	var priorToday int
-	if err := tx.QueryRow(ctx, `
-		SELECT COUNT(*)::int
-		FROM bookings b
-		INNER JOIN vehicle_queue q ON q.id = b.queue_id
-		WHERE q.vehicle_id = $1
-		  AND UPPER(b.booking_status) = 'ACTIVE'
-		  AND CAST(b.created_at AS date) = CURRENT_DATE`, vehicleID).Scan(&priorToday); err != nil {
-		return nil, err
-	}
-	firstTripOfDay := priorToday == 0
+	var exitPass *ExitPass
 
 	// Create individual bookings for each seat
 	var bookings []Booking
@@ -952,6 +915,44 @@ func (r *RepositoryImpl) CreateBookingByQueueEntry(ctx context.Context, req Crea
 			CreatedAt:        createdAt,
 			FirstTripOfDay:   firstTripOfDay,
 		})
+	}
+
+	// Trip + exit pass after booking rows so firstTripOfDay replay stays consistent with created_at.
+	if newAvailableSeats == 0 {
+		fmt.Printf("DEBUG: Vehicle is now fully booked! Creating trip record...\n")
+		tripID := fmt.Sprintf("trip_%d", time.Now().UnixNano())
+		currentExitTime := time.Now().In(time.FixedZone("Africa/Tunis", 3600)) // Use Tunisia timezone
+
+		fmt.Printf("DEBUG: Inserting trip record with ID: %s, Vehicle: %s, Destination: %s\n", tripID, licensePlate, destName)
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO trips (
+				id, queue_id, destination_id, destination_name, license_plate,
+				start_time, created_at, total_seats, booked_seats, created_by
+			) VALUES (
+				$1, $2, $3, $4, $5, NOW(), NOW(), $6, $7, $8
+			)`, tripID, queueID, destID, destName, licensePlate, totalSeats, totalSeats, req.StaffID); err != nil {
+			fmt.Printf("DEBUG: Error creating trip record: %v\n", err)
+			return nil, err
+		}
+		fmt.Printf("DEBUG: Trip record created successfully!\n")
+
+		totalPrice := basePrice * float64(totalSeats)
+		exitPass = &ExitPass{
+			ID:              tripID,
+			QueueID:         queueID,
+			VehicleID:       vehicleID,
+			LicensePlate:    licensePlate,
+			DestinationID:   destID,
+			DestinationName: destName,
+			CurrentExitTime: currentExitTime,
+			TotalPrice:      totalPrice,
+			CreatedBy:       req.StaffID,
+			CreatedByName:   staffName,
+			CreatedAt:       time.Now(),
+			VehicleCapacity: totalSeats,
+			BasePrice:       basePrice,
+		}
+		fmt.Printf("DEBUG: Exit pass created for frontend\n")
 	}
 
 	if err := tx.Commit(ctx); err != nil {

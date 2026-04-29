@@ -64,7 +64,7 @@ type Booking struct {
 	CreatedBy        string    `json:"createdBy"`
 	CreatedByName    string    `json:"createdByName"` // Staff name instead of just ID
 	CreatedAt        time.Time `json:"createdAt"`
-	// FirstTripOfDay is true when this booking is part of the first ACTIVE wave for this vehicle today (all seats in that batch share the same value).
+	// FirstTripOfDay is true for every talon until this vehicle has completed its first trip of the calendar day (any destination). After the first trip exists, further bookings that day are false — used for day-pass vs already-paid signaling.
 	FirstTripOfDay bool `json:"firstTripOfDay,omitempty"`
 }
 
