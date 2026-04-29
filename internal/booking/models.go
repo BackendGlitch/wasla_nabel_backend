@@ -64,6 +64,8 @@ type Booking struct {
 	CreatedBy        string    `json:"createdBy"`
 	CreatedByName    string    `json:"createdByName"` // Staff name instead of just ID
 	CreatedAt        time.Time `json:"createdAt"`
+	// FirstTripOfDay is true when this booking is part of the first ACTIVE wave for this vehicle today (all seats in that batch share the same value).
+	FirstTripOfDay bool `json:"firstTripOfDay,omitempty"`
 }
 
 type CreateBookingByQueueEntryResponse struct {

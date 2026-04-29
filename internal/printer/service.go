@@ -695,6 +695,18 @@ func talonBottomRow(left, right string, width int) string {
 	return left + strings.Repeat(" ", spaces) + right
 }
 
+func talonTopRightStar(width int) string {
+	const marker = "*"
+	if width <= 0 {
+		width = 32
+	}
+	rm := len([]rune(marker))
+	if width < rm {
+		return marker
+	}
+	return strings.Repeat(" ", width-rm) + marker
+}
+
 // Generate ticket content methods
 func (s *Service) generateBookingTicketContent(data *TicketData) string {
 	var content strings.Builder
@@ -727,6 +739,9 @@ func (s *Service) generateBookingTicketContent(data *TicketData) string {
 	content.WriteString("{{PARTIAL_CUT}}\n")
 
 	// Seat first (above talon divider), then divider, then LP + footer (compact spacing).
+	if data.FirstTripOfDay {
+		content.WriteString("{{TALON_TOP_RIGHT_STAR}}\n")
+	}
 	content.WriteString(fmt.Sprintf("{{TALON_SEAT_PROMINENT:%d}}\n", data.SeatNumber))
 	content.WriteString("------------------------------\n")
 	content.WriteString("{{TALON_COMPACT_ON}}\n")
@@ -892,6 +907,9 @@ func (s *Service) generateExitPassTicketContent(data *TicketData) string {
 
 func (s *Service) generateTalonContent(data *TicketData) string {
 	var content strings.Builder
+	if data.FirstTripOfDay {
+		content.WriteString("{{TALON_TOP_RIGHT_STAR}}\n")
+	}
 	content.WriteString(fmt.Sprintf("{{TALON_SEAT_PROMINENT:%d}}\n", data.SeatNumber))
 	content.WriteString("------------------------------\n")
 	content.WriteString("{{TALON_COMPACT_ON}}\n")
@@ -927,6 +945,11 @@ func (s *Service) generateStandardTicketContent(data *TicketData) string {
 // Convert text content to ESC/POS commands
 func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte {
 	var buffer bytes.Buffer
+
+	paperWidth := 32
+	if config != nil && config.Width > 0 {
+		paperWidth = config.Width
+	}
 
 	// Initialize printer
 	buffer.WriteByte(0x1B) // ESC
@@ -974,6 +997,14 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 	// Print content
 	lines := strings.Split(content, "\n")
 	for _, line := range lines {
+		if line == "{{TALON_TOP_RIGHT_STAR}}" {
+			resetStyle()
+			setAlign(0x00)
+			buffer.WriteString(talonTopRightStar(paperWidth))
+			buffer.WriteByte(0x0A)
+			continue
+		}
+
 		// Compact talon markers: smaller font + tighter line spacing for noticeable mini talon.
 		if line == "{{TALON_COMPACT_ON}}" {
 			isCompactTalon = true
@@ -1113,7 +1144,7 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 			setAlign(0x00)
 			setTextStyle(0x00)
 			setTextScale(0x00)
-			buffer.WriteString(talonBottomRow(left, right, 32))
+			buffer.WriteString(talonBottomRow(left, right, paperWidth))
 			buffer.WriteByte(0x0A)
 			continue
 		}

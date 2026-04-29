@@ -45,6 +45,27 @@ func nullableText(v string) interface{} {
 	return v
 }
 
+// firstTripOfDayReplayTx is true when there is no earlier ACTIVE booking for this vehicle on the same calendar day as minCreatedAt (used for idempotent replays).
+func firstTripOfDayReplayTx(ctx context.Context, tx pgx.Tx, vehicleID string, minCreatedAt time.Time) (bool, error) {
+	if strings.TrimSpace(vehicleID) == "" {
+		return false, nil
+	}
+	var n int
+	err := tx.QueryRow(ctx, `
+		SELECT COUNT(*)::int
+		FROM bookings b
+		INNER JOIN vehicle_queue q ON q.id = b.queue_id
+		WHERE q.vehicle_id = $1
+		  AND UPPER(b.booking_status) = 'ACTIVE'
+		  AND CAST(b.created_at AS date) = CAST($2::timestamptz AS date)
+		  AND b.created_at < $2
+	`, vehicleID, minCreatedAt).Scan(&n)
+	if err != nil {
+		return false, err
+	}
+	return n == 0, nil
+}
+
 func (r *RepositoryImpl) getBookingByIdempotencyTx(ctx context.Context, tx pgx.Tx, key string) (*Booking, error) {
 	key = strings.TrimSpace(key)
 	if key == "" {
@@ -92,6 +113,11 @@ func (r *RepositoryImpl) getBookingByIdempotencyTx(ctx context.Context, tx pgx.T
 	if err != nil {
 		return nil, err
 	}
+	ft, err := firstTripOfDayReplayTx(ctx, tx, b.VehicleID, b.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	b.FirstTripOfDay = ft
 	return &b, nil
 }
 
@@ -152,6 +178,21 @@ func (r *RepositoryImpl) getBookingsByIdempotencyTx(ctx context.Context, tx pgx.
 	}
 	if len(bookings) == 0 {
 		return nil, pgx.ErrNoRows
+	}
+
+	minT := bookings[0].CreatedAt
+	vid := bookings[0].VehicleID
+	for _, b := range bookings {
+		if b.CreatedAt.Before(minT) {
+			minT = b.CreatedAt
+		}
+	}
+	ft, err := firstTripOfDayReplayTx(ctx, tx, vid, minT)
+	if err != nil {
+		return nil, err
+	}
+	for i := range bookings {
+		bookings[i].FirstTripOfDay = ft
 	}
 
 	return &CreateBookingByQueueEntryResponse{
@@ -361,6 +402,18 @@ func (r *RepositoryImpl) CreateBookingByDestination(ctx context.Context, req Cre
 		return nil, err
 	}
 
+	var priorToday int
+	if err := tx.QueryRow(ctx, `
+		SELECT COUNT(*)::int
+		FROM bookings b
+		INNER JOIN vehicle_queue q ON q.id = b.queue_id
+		WHERE q.vehicle_id = $1
+		  AND UPPER(b.booking_status) = 'ACTIVE'
+		  AND CAST(b.created_at AS date) = CURRENT_DATE`, vehicleID).Scan(&priorToday); err != nil {
+		return nil, err
+	}
+	firstTripOfDay := priorToday == 0
+
 	// If vehicle is now READY (fully booked), create a trip record (needs licensePlate)
 	var isReady bool
 	var destID, destName string
@@ -430,6 +483,8 @@ func (r *RepositoryImpl) CreateBookingByDestination(ctx context.Context, req Cre
 	if b.ID == "" {
 		return nil, fmt.Errorf("failed to generate unique verification code after %d attempts", verificationAttempts)
 	}
+
+	b.FirstTripOfDay = firstTripOfDay
 
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
@@ -833,6 +888,18 @@ func (r *RepositoryImpl) CreateBookingByQueueEntry(ctx context.Context, req Crea
 		nextSeatNumber = 1
 	}
 
+	var priorToday int
+	if err := tx.QueryRow(ctx, `
+		SELECT COUNT(*)::int
+		FROM bookings b
+		INNER JOIN vehicle_queue q ON q.id = b.queue_id
+		WHERE q.vehicle_id = $1
+		  AND UPPER(b.booking_status) = 'ACTIVE'
+		  AND CAST(b.created_at AS date) = CURRENT_DATE`, vehicleID).Scan(&priorToday); err != nil {
+		return nil, err
+	}
+	firstTripOfDay := priorToday == 0
+
 	// Create individual bookings for each seat
 	var bookings []Booking
 	seatPrice := pricePerSeat + serviceFeePerSeat // base + per-destination service fee
@@ -883,6 +950,7 @@ func (r *RepositoryImpl) CreateBookingByQueueEntry(ctx context.Context, req Crea
 			CreatedBy:        req.StaffID,
 			CreatedByName:    staffName, // Staff name instead of just ID
 			CreatedAt:        createdAt,
+			FirstTripOfDay:   firstTripOfDay,
 		})
 	}
 
