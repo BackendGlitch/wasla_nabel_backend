@@ -993,15 +993,24 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 
 	resetStyle()
 	isCompactTalon := false
+	// After booking↔talon partial cut: pull the first talon line(s) up slightly.
+	pendingCompactTalonTop := false
+	// After the first-trip * line: tighten gap before SIEGE.
+	compactAfterStarLine := false
 
 	// Print content
 	lines := strings.Split(content, "\n")
 	for _, line := range lines {
 		if line == "{{TALON_TOP_RIGHT_STAR}}" {
+			if pendingCompactTalonTop {
+				buffer.Write([]byte{0x1B, 0x33, 12}) // ESC 3 — tighter line spacing for talon block start
+				pendingCompactTalonTop = false
+			}
 			resetStyle()
 			setAlign(0x00)
 			buffer.WriteString(talonTopRightStar(paperWidth))
 			buffer.WriteByte(0x0A)
+			compactAfterStarLine = true
 			continue
 		}
 
@@ -1047,14 +1056,13 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 			continue
 		}
 
-		// Cut marker between printed blocks.
+		// Cut marker between printed blocks (billet | talon). No extra LF before cut — avoids an empty strip above SIEGE.
 		if line == "{{PARTIAL_CUT}}" {
-			// One extra safety feed right before cut for printers with delayed paper movement.
-			buffer.WriteByte(0x0A)
 			buffer.WriteByte(0x1D) // GS
 			buffer.WriteByte(0x56) // V
 			buffer.WriteByte(0x01) // partial cut
 			resetStyle()
+			pendingCompactTalonTop = true
 			continue
 		}
 		if line == "{{FULL_CUT}}" {
@@ -1109,12 +1117,21 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 				resetStyle()
 				continue
 			}
+			switch {
+			case compactAfterStarLine:
+				buffer.Write([]byte{0x1B, 0x33, 8}) // minimal line gap below * row
+				compactAfterStarLine = false
+			case pendingCompactTalonTop:
+				buffer.Write([]byte{0x1B, 0x33, 12}) // tighter first talon line after partial cut (no *)
+				pendingCompactTalonTop = false
+			}
 			resetStyle()
 			setAlign(0x01)
 			setTextStyle(0x08) // bold
 			setTextScale(0x01) // double width (visibly larger body, still below TALON_LP_BIG)
 			buffer.WriteString(fmt.Sprintf("SIEGE %d", n))
 			buffer.WriteByte(0x0A)
+			buffer.Write([]byte{0x1B, 0x32}) // restore default line spacing before divider / LP line
 			resetStyle()
 			continue
 		}
