@@ -667,18 +667,19 @@ func (s *Service) generateBookingTicketContent(data *TicketData) string {
 	}
 	content.WriteString(fmt.Sprintf("Heure: %s\n", data.CreatedAt.Format("15:04")))
 	content.WriteString("------------------------------\n")
-	// Extra feed so the partial cut happens after the main block is fully past the print head.
+	// Keep only a tiny safety feed before cut to avoid visible top/bottom white gaps.
 	content.WriteString("{{FEED_BEFORE_CUT}}\n")
 	content.WriteString("{{PARTIAL_CUT}}\n")
 
-	// Small attached talon for the driver (same ticket index + minimal essentials).
-	content.WriteString(fmt.Sprintf("{{CENTER_SMALL:%s}}\n", strings.ToUpper(companyNameForTicket(data))))
-	content.WriteString("{{CENTER_SMALL:TALON}}\n")
+	// Visibly smaller talon block to clearly distinguish it from the client ticket.
+	content.WriteString("{{TALON_COMPACT_ON}}\n")
+	content.WriteString("{{CENTER_SMALL:MINI TALON}}\n")
 	content.WriteString(fmt.Sprintf("N: %d\n", data.SeatNumber))
 	content.WriteString(fmt.Sprintf("V: %s\n", strings.TrimSpace(data.LicensePlate)))
 	content.WriteString(fmt.Sprintf("D: %s\n", data.DestinationName))
 	content.WriteString(fmt.Sprintf("H: %s\n", data.CreatedAt.Format("15:04")))
-	content.WriteString("------------------------------\n\n")
+	content.WriteString("------------------------------\n")
+	content.WriteString("{{TALON_COMPACT_OFF}}\n")
 
 	return content.String()
 }
@@ -699,8 +700,6 @@ func (s *Service) generateEntryTicketContent(data *TicketData) string {
 	content.WriteString("--------------------------------\n")
 	content.WriteString("Bon voyage!\n")
 
-	content.WriteString("\n\n")
-
 	return content.String()
 }
 
@@ -720,8 +719,6 @@ func (s *Service) generateExitTicketContent(data *TicketData) string {
 	// Compact footer
 	content.WriteString("--------------------------------\n")
 	content.WriteString("Merci!\n")
-
-	content.WriteString("\n\n")
 
 	return content.String()
 }
@@ -768,8 +765,6 @@ func (s *Service) generateDayPassTicketContent(data *TicketData) string {
 	// Compact footer
 	content.WriteString("--------------------------------\n")
 	content.WriteString("Valide toute la journée!\n")
-
-	content.WriteString("\n\n")
 
 	return content.String()
 }
@@ -837,19 +832,19 @@ func (s *Service) generateExitPassTicketContent(data *TicketData) string {
 	content.WriteString("--------------------------------\n")
 	content.WriteString("🚪 Sortie autorisée!\n")
 
-	content.WriteString("\n\n")
-
 	return content.String()
 }
 
 func (s *Service) generateTalonContent(data *TicketData) string {
 	var content strings.Builder
+	content.WriteString("{{TALON_COMPACT_ON}}\n")
 	content.WriteString("{{CENTER_SMALL:TALON}}\n")
 	content.WriteString(fmt.Sprintf("N: %d\n", data.SeatNumber))
 	content.WriteString(fmt.Sprintf("V: %s\n", data.LicensePlate))
 	content.WriteString(fmt.Sprintf("D: %s\n", data.DestinationName))
 	content.WriteString(fmt.Sprintf("H: %s\n", data.CreatedAt.Format("15:04")))
-	content.WriteString("------------------------------\n\n")
+	content.WriteString("------------------------------\n")
+	content.WriteString("{{TALON_COMPACT_OFF}}\n")
 
 	return content.String()
 }
@@ -870,8 +865,6 @@ func (s *Service) generateStandardTicketContent(data *TicketData) string {
 	// Compact footer
 	content.WriteString("--------------------------------\n")
 	content.WriteString("Merci!\n")
-
-	content.WriteString("\n\n")
 
 	return content.String()
 }
@@ -921,10 +914,30 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 	}
 
 	resetStyle()
+	isCompactTalon := false
 
 	// Print content
 	lines := strings.Split(content, "\n")
 	for _, line := range lines {
+		// Compact talon markers: smaller font + tighter line spacing for noticeable mini talon.
+		if line == "{{TALON_COMPACT_ON}}" {
+			isCompactTalon = true
+			// ESC M 1 -> Font B (smaller)
+			buffer.Write([]byte{0x1B, 0x4D, 0x01})
+			// ESC 3 n -> set line spacing to n dots (smaller than default)
+			buffer.Write([]byte{0x1B, 0x33, 18})
+			continue
+		}
+		if line == "{{TALON_COMPACT_OFF}}" {
+			isCompactTalon = false
+			// ESC 2 -> default line spacing
+			buffer.Write([]byte{0x1B, 0x32})
+			// ESC M 0 -> Font A
+			buffer.Write([]byte{0x1B, 0x4D, 0x00})
+			resetStyle()
+			continue
+		}
+
 		// Dedicated marker for printing the ticket index in large, centered text.
 		if strings.HasPrefix(line, "{{BIG_INDEX:") && strings.HasSuffix(line, "}}") {
 			value := strings.TrimSuffix(strings.TrimPrefix(line, "{{BIG_INDEX:"), "}}")
@@ -939,7 +952,7 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 
 		// Blank feed before cutters so blades never intersect the last inked line / wrap line.
 		if line == "{{FEED_BEFORE_CUT}}" {
-			for range 4 {
+			for range 1 {
 				buffer.WriteByte(0x0A)
 			}
 			resetStyle()
@@ -948,9 +961,6 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 
 		// Cut marker between printed blocks.
 		if line == "{{PARTIAL_CUT}}" {
-			for range 2 {
-				buffer.WriteByte(0x0A)
-			}
 			buffer.WriteByte(0x1D) // GS
 			buffer.WriteByte(0x56) // V
 			buffer.WriteByte(0x01) // partial cut
@@ -1021,6 +1031,10 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 			setTextStyle(0x00)
 			setTextScale(0x00)
 		}
+		if isCompactTalon {
+			// Keep talon compact even for title/separator lines.
+			buffer.Write([]byte{0x1B, 0x4D, 0x01})
+		}
 
 		buffer.WriteString(line)
 		buffer.WriteByte(0x0A) // Line feed
@@ -1028,8 +1042,8 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 
 	resetStyle()
 
-	// Extra feeds before final cut so ticket/talon tails (e.g. long LP) exit the cutter cleanly.
-	for range 6 {
+	// Keep one minimal feed before final cut to avoid large trailing white space.
+	for range 1 {
 		buffer.WriteByte(0x0A)
 	}
 
