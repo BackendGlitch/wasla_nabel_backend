@@ -785,7 +785,7 @@ func (r *RepositoryImpl) DeleteQueueEntry(ctx context.Context, id string) error 
 		FROM vehicle_queue q
 		LEFT JOIN vehicles v ON v.id = q.vehicle_id
 		WHERE q.id = $1
-		FOR UPDATE`, id).Scan(&vehicleID, &lp, &destID, &destName,
+		FOR UPDATE OF q`, id).Scan(&vehicleID, &lp, &destID, &destName,
 		&totalSeats, &availableSeats, &basePrice)
 	if err != nil {
 		if err == pgx.ErrNoRows {
