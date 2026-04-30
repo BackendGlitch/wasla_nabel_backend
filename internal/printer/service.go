@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"image/png"
-	"math"
 	"strconv"
 	"net/url"
 	"os"
@@ -793,48 +792,71 @@ func (s *Service) generateExitTicketContent(data *TicketData) string {
 	return content.String()
 }
 
+func tunisLocationForTickets() *time.Location {
+	loc, err := time.LoadLocation("Africa/Tunis")
+	if err != nil {
+		return time.UTC
+	}
+	return loc
+}
+
+// tunisCalendarDayBounds returns [start, end] of the calendar day in Africa/Tunis for `at`.
+func tunisCalendarDayBounds(at time.Time) (time.Time, time.Time) {
+	loc := tunisLocationForTickets()
+	t := at.In(loc)
+	y, m, d := t.Date()
+	start := time.Date(y, m, d, 0, 0, 0, 0, loc)
+	end := start.Add(24*time.Hour - time.Second)
+	return start, end
+}
+
+func formatTicketDT(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.In(tunisLocationForTickets()).Format("02/01/2006 15:04")
+}
+
 func (s *Service) generateDayPassTicketContent(data *TicketData) string {
 	var content strings.Builder
 
-	// Compact ticket title
 	content.WriteString("BILLET PASS JOURNÉE\n")
 	content.WriteString("--------------------------------\n")
 
-	// Essential information in compact format
 	content.WriteString(fmt.Sprintf("Vehicule: %s\n", data.LicensePlate))
-	content.WriteString(fmt.Sprintf("Route: %s\n", data.RouteName))
-
-	// Day pass: base + 200 millimes / siège, then total (total is authoritative for display)
-	{
-		seats := 1.0
-		if data.SeatNumber > 0 {
-			seats = float64(data.SeatNumber)
-		}
-		feeTotal := resolveServiceFeePerSeat(data) * seats
-		baseFromPayload := 0.0
-		if data.BasePrice > 0 {
-			baseFromPayload = data.BasePrice * seats
-		}
-		expected := baseFromPayload + feeTotal
-		var baseLine float64
-		if data.BasePrice > 0 && math.Abs(expected-data.TotalAmount) < 0.02 {
-			baseLine = baseFromPayload
-		} else {
-			baseLine = data.TotalAmount - feeTotal
-			if baseLine < 0 {
-				baseLine = 0
-			}
-		}
-		lineTotal := baseLine + feeTotal
-		content.WriteString(fmt.Sprintf("Prix de base: %.2f TND\n", baseLine))
-		content.WriteString(fmt.Sprintf("Frais de services: %.2f TND\n", feeTotal))
-		content.WriteString(fmt.Sprintf("Total: %.2f TND\n", lineTotal))
+	if strings.TrimSpace(data.RouteName) != "" {
+		content.WriteString(fmt.Sprintf("Route: %s\n", data.RouteName))
 	}
-	content.WriteString(fmt.Sprintf("Date: %s\n", data.CreatedAt.Format("02/01/2006 15:04")))
+
+	// Prix forfait pass journée affiché comme un seul montant (sans ligne « frais »).
+	content.WriteString(fmt.Sprintf("Montant: %.3f TND\n", pricing.DayPassTotalPriceTND))
+	content.WriteString("Pas de frais de service.\n")
+
+	purchAt := data.PurchaseDate
+	if purchAt.IsZero() {
+		purchAt = data.CreatedAt
+	}
+	if purchAt.IsZero() {
+		purchAt = time.Now()
+	}
+	validFrom, validUntil := data.ValidFrom, data.ValidUntil
+	if validFrom.IsZero() || validUntil.IsZero() {
+		vf, vt := tunisCalendarDayBounds(purchAt)
+		if validFrom.IsZero() {
+			validFrom = vf
+		}
+		if validUntil.IsZero() {
+			validUntil = vt
+		}
+	}
+
+	content.WriteString(fmt.Sprintf("Date d'achat: %s\n", formatTicketDT(purchAt)))
+	content.WriteString(fmt.Sprintf("Valide du %s\n", formatTicketDT(validFrom)))
+	content.WriteString(fmt.Sprintf("jusqu'au %s (fin de validité)\n", formatTicketDT(validUntil)))
+
 	content.WriteString(fmt.Sprintf("Agent: %s\n", agentLineForTicket(data)))
-	// Compact footer
 	content.WriteString("--------------------------------\n")
-	content.WriteString("Valide toute la journée!\n")
+	content.WriteString("Merci!\n")
 
 	return content.String()
 }

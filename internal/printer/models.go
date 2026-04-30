@@ -108,6 +108,10 @@ type TicketData struct {
 	FirstTripOfDay bool `json:"firstTripOfDay,omitempty"`
 	// Printer configuration from frontend
 	PrinterConfig *FrontendPrinterConfig `json:"printerConfig,omitempty"`
+	// Day pass ticket: mirrors queue.DayPassCreatedEvent (omit when absent).
+	PurchaseDate time.Time `json:"purchaseDate,omitempty"`
+	ValidFrom    time.Time `json:"validFrom,omitempty"`
+	ValidUntil   time.Time `json:"validUntil,omitempty"`
 }
 
 // ExitPassAndRemoveRequest represents the request for printing exit pass and removing from queue
