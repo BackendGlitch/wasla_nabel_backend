@@ -680,8 +680,11 @@ func (r *RepositoryImpl) ListTrips(ctx context.Context, limit int) ([]Trip, erro
 
 // ListTodayTrips returns trips for the current day, optionally filtered by license plate
 func (r *RepositoryImpl) ListTodayTrips(ctx context.Context, search string, limit int) ([]Trip, error) {
-	if limit <= 0 || limit > 200 {
+	if limit <= 0 {
 		limit = 100
+	}
+	if limit > 2000 {
+		limit = 2000
 	}
 	var rows pgx.Rows
 	var err error

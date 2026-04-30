@@ -3,6 +3,7 @@ package booking
 import (
 	"context"
 	"net/http"
+	"strconv"
 
 	"station-backend/pkg/utils"
 
@@ -106,7 +107,13 @@ func (h *Handler) ListTrips(c *gin.Context) {
 
 func (h *Handler) ListTodayTrips(c *gin.Context) {
 	search := c.Query("search")
-	trips, err := h.service.ListTodayTrips(c.Request.Context(), search, 0)
+	limit := 0
+	if s := c.Query("limit"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil {
+			limit = n
+		}
+	}
+	trips, err := h.service.ListTodayTrips(c.Request.Context(), search, limit)
 	if err != nil {
 		utils.InternalServerErrorResponse(c, "Failed to list today's trips", err)
 		return
