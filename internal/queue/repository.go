@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"station-backend/internal/pricing"
 )
 
 type Repository interface {
@@ -599,14 +600,14 @@ func (r *RepositoryImpl) AddQueueEntry(ctx context.Context, req AddQueueEntryReq
                 id, vehicle_id, license_plate, price, purchase_date,
                 valid_from, valid_until, is_active, created_by, created_at, updated_at
             ) VALUES (
-                $1, $2, $3, 2.0,
+                $1, $2, $3, $5,
                 (now() AT TIME ZONE 'Africa/Tunis'),
                 date_trunc('day', (now() AT TIME ZONE 'Africa/Tunis')),
                 (date_trunc('day', (now() AT TIME ZONE 'Africa/Tunis')) + interval '1 day' - interval '1 second'),
                 true, $4,
                 (now() AT TIME ZONE 'Africa/Tunis'),
                 (now() AT TIME ZONE 'Africa/Tunis')
-            )`, newDayPassID, req.VehicleID, lp, req.CreatedBy)
+            )`, newDayPassID, req.VehicleID, lp, req.CreatedBy, pricing.DayPassTotalPriceTND)
 		if err != nil {
 			return nil, nil, nil, "", err
 		}
@@ -620,7 +621,7 @@ func (r *RepositoryImpl) AddQueueEntry(ctx context.Context, req AddQueueEntryReq
 			LicensePlate:    lp,
 			DestinationID:   req.DestinationID,
 			DestinationName: req.DestinationName,
-			Price:           2.0,
+			Price:           pricing.DayPassTotalPriceTND,
 			PurchaseDate:    nowTunis,
 			ValidFrom:       startOfDay,
 			ValidUntil:      endOfDay,

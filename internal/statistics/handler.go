@@ -599,7 +599,7 @@ func (h *Handler) WebSocketStats(c *gin.Context) {
 
 // GetActualIncome godoc
 // @Summary Get actual income with destination base prices
-// @Description Get actual income calculated as (destination base price + 0.2 TND) per seat
+// @Description Get actual income: per seat (routes.base_price + routes.service_fee per destination; default fee 0.2 TND); day passes SUM(price)
 // @Tags statistics
 // @Accept json
 // @Produce json

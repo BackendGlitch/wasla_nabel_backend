@@ -2,6 +2,7 @@ package booking
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -30,6 +31,9 @@ type Repository interface {
 	GetGhostBookingCount(ctx context.Context, destinationID string) (int, error)
 	// Trip count by license plate
 	GetTodayTripsCountByLicensePlate(ctx context.Context, licensePlate string) (int, error)
+
+	// GetServiceFeeTNDByDestination returns routes.service_fee for station_id (destination); default if missing.
+	GetServiceFeeTNDByDestination(ctx context.Context, destinationID string) (float64, error)
 }
 
 type RepositoryImpl struct {
@@ -1305,4 +1309,22 @@ func (r *RepositoryImpl) GetTodayTripsCountByLicensePlate(ctx context.Context, l
 		return 0, err
 	}
 	return count, nil
+}
+
+// GetServiceFeeTNDByDestination returns per-seat station fee from routes.service_fee (millimes stored as TND fraction).
+func (r *RepositoryImpl) GetServiceFeeTNDByDestination(ctx context.Context, destinationID string) (float64, error) {
+	if strings.TrimSpace(destinationID) == "" {
+		return pricing.ServiceFeePerSeatTND, nil
+	}
+	var fee float64
+	err := r.db.QueryRow(ctx, `
+		SELECT COALESCE(service_fee, $2) FROM routes WHERE station_id = $1
+	`, destinationID, pricing.ServiceFeePerSeatTND).Scan(&fee)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return pricing.ServiceFeePerSeatTND, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return fee, nil
 }

@@ -27,13 +27,11 @@ func NewStatisticsLoggerWithRealtime(db *pgxpool.Pool, realtimeHub *RealTimeStat
 	return &StatisticsLogger{db: db, realtimeHub: realtimeHub}
 }
 
-// LogSeatBookingTransaction logs a seat booking transaction
-func (sl *StatisticsLogger) LogSeatBookingTransaction(ctx context.Context, staffID, bookingID, stationID string, seats int) error {
-	seatIncome := float64(seats) * pricing.ServiceFeePerSeatTND
-
+// LogSeatBookingTransaction logs a seat booking transaction (amount = station fee for this destination × seats).
+func (sl *StatisticsLogger) LogSeatBookingTransaction(ctx context.Context, staffID, bookingID, stationID string, stationFeeTotal float64, seats int) error {
 	_, err := sl.db.Exec(ctx, `
 		SELECT log_staff_transaction($1, $2, $3, $4, $5, $6)
-	`, staffID, "SEAT_BOOKING", bookingID, seatIncome, seats, stationID)
+	`, staffID, "SEAT_BOOKING", bookingID, stationFeeTotal, seats, stationID)
 
 	if err != nil {
 		log.Printf("Failed to log seat booking transaction: %v", err)
@@ -52,7 +50,7 @@ func (sl *StatisticsLogger) LogSeatBookingTransaction(ctx context.Context, staff
 			StaffID:         staffID,
 			StaffName:       staffName,
 			TransactionType: "SEAT_BOOKING",
-			Amount:          seatIncome,
+			Amount:          stationFeeTotal,
 			Quantity:        seats,
 			StationID:       stationID,
 			StationName:     stationName,
@@ -67,10 +65,10 @@ func (sl *StatisticsLogger) LogSeatBookingTransaction(ctx context.Context, staff
 
 // LogDayPassTransaction logs a day pass transaction
 func (sl *StatisticsLogger) LogDayPassTransaction(ctx context.Context, staffID, dayPassID, stationID string) error {
-	// Day pass income: 2 TND per day pass
+	amount := pricing.DayPassTotalPriceTND
 	_, err := sl.db.Exec(ctx, `
 		SELECT log_staff_transaction($1, $2, $3, $4, $5, $6)
-	`, staffID, "DAY_PASS_SALE", dayPassID, 2.0, 1, stationID)
+	`, staffID, "DAY_PASS_SALE", dayPassID, amount, 1, stationID)
 
 	if err != nil {
 		log.Printf("Failed to log day pass transaction: %v", err)
@@ -89,7 +87,7 @@ func (sl *StatisticsLogger) LogDayPassTransaction(ctx context.Context, staffID, 
 			StaffID:         staffID,
 			StaffName:       staffName,
 			TransactionType: "DAY_PASS_SALE",
-			Amount:          2.0,
+			Amount:          amount,
 			Quantity:        1,
 			StationID:       stationID,
 			StationName:     stationName,
@@ -103,10 +101,10 @@ func (sl *StatisticsLogger) LogDayPassTransaction(ctx context.Context, staffID, 
 }
 
 // LogSeatBookingTransactionAsync logs a seat booking transaction asynchronously
-func (sl *StatisticsLogger) LogSeatBookingTransactionAsync(staffID, bookingID, stationID string, seats int) {
+func (sl *StatisticsLogger) LogSeatBookingTransactionAsync(staffID, bookingID, stationID string, stationFeeTotal float64, seats int) {
 	go func() {
 		ctx := context.Background()
-		if err := sl.LogSeatBookingTransaction(ctx, staffID, bookingID, stationID, seats); err != nil {
+		if err := sl.LogSeatBookingTransaction(ctx, staffID, bookingID, stationID, stationFeeTotal, seats); err != nil {
 			log.Printf("Async seat booking transaction logging failed: %v", err)
 		}
 

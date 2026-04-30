@@ -3,9 +3,10 @@ package booking
 import (
 	"context"
 
-	"station-backend/pkg/events"
+	"station-backend/internal/pricing"
 	"station-backend/internal/statistics"
 	"station-backend/internal/websocket"
+	"station-backend/pkg/events"
 )
 
 type Service struct {
@@ -21,11 +22,14 @@ func NewService(repo Repository, ws websocket.Broadcaster, statsLogger *statisti
 func (s *Service) CreateBookingByDestination(ctx context.Context, req CreateBookingByDestinationRequest) (*Booking, error) {
 	b, err := s.repo.CreateBookingByDestination(ctx, req)
 	if err == nil {
-		// Log statistics for seat booking
+		// Log statistics for seat booking (station fee from routes.service_fee × seats)
 		if s.statsLogger != nil && req.StaffID != "" {
-			// For now, use destination ID as station ID (you may need to modify this based on your system)
-			stationID := req.DestinationID // This might need to be changed to actual station ID
-			s.statsLogger.LogSeatBookingTransactionAsync(req.StaffID, b.ID, stationID, b.SeatsBooked)
+			stationID := req.DestinationID
+			fee, ferr := s.repo.GetServiceFeeTNDByDestination(ctx, req.DestinationID)
+			if ferr != nil {
+				fee = pricing.ServiceFeePerSeatTND
+			}
+			s.statsLogger.LogSeatBookingTransactionAsync(req.StaffID, b.ID, stationID, float64(b.SeatsBooked)*fee, b.SeatsBooked)
 		}
 
 		if s.ws != nil {
@@ -55,10 +59,13 @@ func (s *Service) CreateBookingByQueueEntry(ctx context.Context, req CreateBooki
 		if s.statsLogger != nil && req.StaffID != "" && len(response.Bookings) > 0 {
 			// Get destination ID from the queue entry for station ID
 			if destID, derr := s.repo.GetDestinationByQueueEntry(ctx, req.QueueEntryID); derr == nil {
-				stationID := destID // This might need to be changed to actual station ID
-				// Log each seat booking
+				stationID := destID
+				fee, ferr := s.repo.GetServiceFeeTNDByDestination(ctx, destID)
+				if ferr != nil {
+					fee = pricing.ServiceFeePerSeatTND
+				}
 				for _, booking := range response.Bookings {
-					s.statsLogger.LogSeatBookingTransactionAsync(req.StaffID, booking.ID, stationID, booking.SeatsBooked)
+					s.statsLogger.LogSeatBookingTransactionAsync(req.StaffID, booking.ID, stationID, float64(booking.SeatsBooked)*fee, booking.SeatsBooked)
 				}
 			}
 		}
@@ -168,7 +175,11 @@ func (s *Service) CreateGhostBooking(ctx context.Context, req CreateGhostBooking
 	if err == nil && len(bookings) > 0 {
 		for _, b := range bookings {
 			if s.statsLogger != nil && req.StaffID != "" {
-				s.statsLogger.LogSeatBookingTransactionAsync(req.StaffID, b.ID, b.DestinationID, b.SeatsBooked)
+				fee, ferr := s.repo.GetServiceFeeTNDByDestination(ctx, b.DestinationID)
+				if ferr != nil {
+					fee = pricing.ServiceFeePerSeatTND
+				}
+				s.statsLogger.LogSeatBookingTransactionAsync(req.StaffID, b.ID, b.DestinationID, float64(b.SeatsBooked)*fee, b.SeatsBooked)
 			}
 			if s.ws != nil {
 				s.ws.BroadcastToStation(b.DestinationID, events.GhostBookingCreated, b)

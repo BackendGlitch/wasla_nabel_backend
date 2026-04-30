@@ -124,15 +124,18 @@ func (r *RepositoryImpl) getStaffDailyIncomeFallback(ctx context.Context, staffI
 		FROM staff s
 		LEFT JOIN (
 			SELECT
-				created_by::text as staff_id,
-				SUM(seats_booked)::int as total_seats_booked,
-				SUM(seats_booked * 0.2) as total_seat_income,
+				b.created_by::text as staff_id,
+				SUM(b.seats_booked)::int as total_seats_booked,
+				SUM(b.seats_booked * COALESCE(r1.service_fee, r2.service_fee, 0.2)) as total_seat_income,
 				COUNT(*)::int as total_transactions
-			FROM bookings
-			WHERE DATE(created_at) = $2
-				AND booking_status = 'ACTIVE'
-				AND created_by IS NOT NULL
-			GROUP BY created_by::text
+			FROM bookings b
+			LEFT JOIN vehicle_queue q ON q.id = NULLIF(b.queue_id, '')
+			LEFT JOIN routes r1 ON r1.station_id = b.destination_id
+			LEFT JOIN routes r2 ON r2.station_id = q.destination_id
+			WHERE DATE(b.created_at) = $2
+				AND b.booking_status = 'ACTIVE'
+				AND b.created_by IS NOT NULL
+			GROUP BY b.created_by::text
 		) booking_stats ON booking_stats.staff_id = s.id::text
 		LEFT JOIN (
 			SELECT
@@ -352,38 +355,51 @@ func (r *RepositoryImpl) GetAllStaffIncomeForDate(ctx context.Context, date time
 			CONCAT(s.first_name, ' ', s.last_name) as staff_name,
 			$1::date as date,
 			COALESCE(booking_stats.total_seats_booked, 0) as seat_bookings,
-			COALESCE(booking_stats.total_seats_booked, 0) * 0.2 as seat_income,
+			COALESCE(booking_stats.total_seat_income, 0) as seat_income,
 			COALESCE(daypass_stats.total_day_passes_sold, 0) as day_pass_sales,
-			COALESCE(daypass_stats.total_day_passes_sold, 0) * 2.0 as day_pass_income,
-			(COALESCE(booking_stats.total_seats_booked, 0) * 0.2) + (COALESCE(daypass_stats.total_day_passes_sold, 0) * 2.0) as total_income,
+			COALESCE(daypass_stats.total_day_pass_income, 0) as day_pass_income,
+			COALESCE(booking_stats.total_seat_income, 0) + COALESCE(daypass_stats.total_day_pass_income, 0) as total_income,
 			COALESCE(booking_stats.total_transactions, 0) + COALESCE(daypass_stats.total_transactions, 0) as total_transactions,
-			0.2 as avg_income_per_seat,
-			2.0 as avg_income_per_day_pass
+			CASE
+				WHEN COALESCE(booking_stats.total_seats_booked, 0) > 0
+				THEN COALESCE(booking_stats.total_seat_income, 0) / booking_stats.total_seats_booked
+				ELSE 0
+			END as avg_income_per_seat,
+			CASE
+				WHEN COALESCE(daypass_stats.total_day_passes_sold, 0) > 0
+				THEN COALESCE(daypass_stats.total_day_pass_income, 0) / daypass_stats.total_day_passes_sold
+				ELSE 0
+			END as avg_income_per_day_pass
 		FROM staff s
 		LEFT JOIN (
 			SELECT 
-				created_by as staff_id,
-				SUM(seats_booked) as total_seats_booked,
+				b.created_by as staff_id,
+				SUM(b.seats_booked) as total_seats_booked,
+				SUM(b.seats_booked * COALESCE(r1.service_fee, r2.service_fee, 0.2)) as total_seat_income,
 				COUNT(*) as total_transactions
-			FROM bookings 
-			WHERE DATE(created_at) = $1 
-				AND booking_status = 'ACTIVE'
-				AND created_by IS NOT NULL
-			GROUP BY created_by
+			FROM bookings b
+			LEFT JOIN vehicle_queue q ON q.id = NULLIF(b.queue_id, '')
+			LEFT JOIN routes r1 ON r1.station_id = b.destination_id
+			LEFT JOIN routes r2 ON r2.station_id = q.destination_id
+			WHERE DATE(b.created_at) = $1
+				AND b.booking_status = 'ACTIVE'
+				AND b.created_by IS NOT NULL
+			GROUP BY b.created_by
 		) booking_stats ON s.id = booking_stats.staff_id
 		LEFT JOIN (
 			SELECT 
 				created_by as staff_id,
 				COUNT(*) as total_day_passes_sold,
+				COALESCE(SUM(price), 0) as total_day_pass_income,
 				COUNT(*) as total_transactions
 			FROM day_passes 
-			WHERE DATE(purchase_date) = $1 
+			WHERE DATE(purchase_date) = $1
 				AND created_by IS NOT NULL
 			GROUP BY created_by
 		) daypass_stats ON s.id = daypass_stats.staff_id
 		WHERE s.is_active = true
 			AND (booking_stats.staff_id IS NOT NULL OR daypass_stats.staff_id IS NOT NULL)
-		ORDER BY ((COALESCE(booking_stats.total_seats_booked, 0) * 0.2) + (COALESCE(daypass_stats.total_day_passes_sold, 0) * 2.0)) DESC
+		ORDER BY (COALESCE(booking_stats.total_seat_income, 0) + COALESCE(daypass_stats.total_day_pass_income, 0)) DESC
 	`
 
 	rows, err := r.db.Query(ctx, query, date)
@@ -577,24 +593,25 @@ func (r *RepositoryImpl) GetActualIncomeForDate(ctx context.Context, date time.T
 			SELECT 
 				b.seats_booked,
 				COALESCE(b.destination_id, q.destination_id) as destination_id,
-				COALESCE(r1.base_price, r2.base_price, q.base_price, 0.0) as base_price
+				COALESCE(r1.base_price, r2.base_price, q.base_price, 0.0) as base_price,
+				COALESCE(r1.service_fee, r2.service_fee, 0.2) as service_fee
 			FROM bookings b
-			LEFT JOIN vehicle_queue q ON b.queue_id = q.id
+			LEFT JOIN vehicle_queue q ON q.id = NULLIF(b.queue_id, '')
 			LEFT JOIN routes r1 ON r1.station_id = b.destination_id
 			LEFT JOIN routes r2 ON r2.station_id = q.destination_id
 			WHERE DATE(b.created_at) = $1
 				AND b.booking_status = 'ACTIVE'
 		),
 		day_passes_today AS (
-			SELECT COUNT(*) as count
+			SELECT COUNT(*)::bigint as cnt, COALESCE(SUM(price), 0) as revenue
 			FROM day_passes
 			WHERE DATE(purchase_date) = $1
 		)
 		SELECT 
 			COALESCE(SUM(seats_booked), 0) as seats_booked,
-			COALESCE(SUM(seats_booked * (base_price + 0.2)), 0) as actual_seat_income,
-			COALESCE((SELECT count FROM day_passes_today), 0) as day_pass_sales,
-			COALESCE((SELECT count FROM day_passes_today) * 2.0, 0) as day_pass_income,
+			COALESCE(SUM(seats_booked * (base_price + service_fee)), 0) as actual_seat_income,
+			COALESCE((SELECT cnt FROM day_passes_today), 0) as day_pass_sales,
+			COALESCE((SELECT revenue FROM day_passes_today), 0) as day_pass_income,
 			COUNT(*) FILTER (WHERE base_price = 0) as seats_without_destination
 		FROM today_bookings;
 	`
@@ -625,9 +642,10 @@ func (r *RepositoryImpl) GetActualIncomeForPeriod(ctx context.Context, startTime
 			SELECT 
 				b.seats_booked,
 				COALESCE(b.destination_id, q.destination_id) as destination_id,
-				COALESCE(r1.base_price, r2.base_price, q.base_price, 0.0) as base_price
+				COALESCE(r1.base_price, r2.base_price, q.base_price, 0.0) as base_price,
+				COALESCE(r1.service_fee, r2.service_fee, 0.2) as service_fee
 			FROM bookings b
-			LEFT JOIN vehicle_queue q ON b.queue_id = q.id
+			LEFT JOIN vehicle_queue q ON q.id = NULLIF(b.queue_id, '')
 			LEFT JOIN routes r1 ON r1.station_id = b.destination_id
 			LEFT JOIN routes r2 ON r2.station_id = q.destination_id
 			WHERE b.created_at >= $1::timestamp
@@ -635,16 +653,16 @@ func (r *RepositoryImpl) GetActualIncomeForPeriod(ctx context.Context, startTime
 				AND b.booking_status = 'ACTIVE'
 		),
 		day_passes_period AS (
-			SELECT COUNT(*) as count
+			SELECT COUNT(*)::bigint as cnt, COALESCE(SUM(price), 0) as revenue
 			FROM day_passes
 			WHERE purchase_date >= $1::timestamp
 				AND purchase_date <= $2::timestamp
 		)
 		SELECT 
 			COALESCE(SUM(seats_booked), 0) as seats_booked,
-			COALESCE(SUM(seats_booked * (base_price + 0.2)), 0) as actual_seat_income,
-			COALESCE((SELECT count FROM day_passes_period), 0) as day_pass_sales,
-			COALESCE((SELECT count FROM day_passes_period) * 2.0, 0) as day_pass_income,
+			COALESCE(SUM(seats_booked * (base_price + service_fee)), 0) as actual_seat_income,
+			COALESCE((SELECT cnt FROM day_passes_period), 0) as day_pass_sales,
+			COALESCE((SELECT revenue FROM day_passes_period), 0) as day_pass_income,
 			COUNT(*) FILTER (WHERE base_price = 0) as seats_without_destination
 		FROM period_bookings;
 	`
@@ -675,9 +693,10 @@ func (r *RepositoryImpl) GetActualIncomeForMonth(ctx context.Context, year, mont
 			SELECT 
 				b.seats_booked,
 				COALESCE(b.destination_id, q.destination_id) as destination_id,
-				COALESCE(r1.base_price, r2.base_price, q.base_price, 0.0) as base_price
+				COALESCE(r1.base_price, r2.base_price, q.base_price, 0.0) as base_price,
+				COALESCE(r1.service_fee, r2.service_fee, 0.2) as service_fee
 			FROM bookings b
-			LEFT JOIN vehicle_queue q ON b.queue_id = q.id
+			LEFT JOIN vehicle_queue q ON q.id = NULLIF(b.queue_id, '')
 			LEFT JOIN routes r1 ON r1.station_id = b.destination_id
 			LEFT JOIN routes r2 ON r2.station_id = q.destination_id
 			WHERE EXTRACT(YEAR FROM b.created_at) = $1
@@ -685,16 +704,16 @@ func (r *RepositoryImpl) GetActualIncomeForMonth(ctx context.Context, year, mont
 				AND b.booking_status = 'ACTIVE'
 		),
 		day_passes_month AS (
-			SELECT COUNT(*) as count
+			SELECT COUNT(*)::bigint as cnt, COALESCE(SUM(price), 0) as revenue
 			FROM day_passes
 			WHERE EXTRACT(YEAR FROM purchase_date) = $1
 				AND EXTRACT(MONTH FROM purchase_date) = $2
 		)
 		SELECT 
 			COALESCE(SUM(seats_booked), 0) as seats_booked,
-			COALESCE(SUM(seats_booked * (base_price + 0.2)), 0) as actual_seat_income,
-			COALESCE((SELECT count FROM day_passes_month), 0) as day_pass_sales,
-			COALESCE((SELECT count FROM day_passes_month) * 2.0, 0) as day_pass_income,
+			COALESCE(SUM(seats_booked * (base_price + service_fee)), 0) as actual_seat_income,
+			COALESCE((SELECT cnt FROM day_passes_month), 0) as day_pass_sales,
+			COALESCE((SELECT revenue FROM day_passes_month), 0) as day_pass_income,
 			COUNT(*) FILTER (WHERE base_price = 0) as seats_without_destination
 		FROM month_bookings;
 	`
@@ -724,40 +743,53 @@ func (r *RepositoryImpl) GetAllStaffIncomeForMonth(ctx context.Context, year, mo
 			CONCAT(s.first_name, ' ', s.last_name) as staff_name,
 			$3::date as date,
 			COALESCE(booking_stats.total_seats_booked, 0) as seat_bookings,
-			COALESCE(booking_stats.total_seats_booked, 0) * 0.2 as seat_income,
+			COALESCE(booking_stats.total_seat_income, 0) as seat_income,
 			COALESCE(daypass_stats.total_day_passes_sold, 0) as day_pass_sales,
-			COALESCE(daypass_stats.total_day_passes_sold, 0) * 2.0 as day_pass_income,
-			(COALESCE(booking_stats.total_seats_booked, 0) * 0.2) + (COALESCE(daypass_stats.total_day_passes_sold, 0) * 2.0) as total_income,
+			COALESCE(daypass_stats.total_day_pass_income, 0) as day_pass_income,
+			COALESCE(booking_stats.total_seat_income, 0) + COALESCE(daypass_stats.total_day_pass_income, 0) as total_income,
 			COALESCE(booking_stats.total_transactions, 0) + COALESCE(daypass_stats.total_transactions, 0) as total_transactions,
-			0.2 as avg_income_per_seat,
-			2.0 as avg_income_per_day_pass
+			CASE
+				WHEN COALESCE(booking_stats.total_seats_booked, 0) > 0
+				THEN COALESCE(booking_stats.total_seat_income, 0) / booking_stats.total_seats_booked
+				ELSE 0
+			END as avg_income_per_seat,
+			CASE
+				WHEN COALESCE(daypass_stats.total_day_passes_sold, 0) > 0
+				THEN COALESCE(daypass_stats.total_day_pass_income, 0) / daypass_stats.total_day_passes_sold
+				ELSE 0
+			END as avg_income_per_day_pass
 		FROM staff s
 		LEFT JOIN (
 			SELECT 
-				created_by as staff_id,
-				SUM(seats_booked) as total_seats_booked,
+				b.created_by as staff_id,
+				SUM(b.seats_booked) as total_seats_booked,
+				SUM(b.seats_booked * COALESCE(r1.service_fee, r2.service_fee, 0.2)) as total_seat_income,
 				COUNT(*) as total_transactions
-			FROM bookings 
-			WHERE EXTRACT(YEAR FROM created_at) = $1 
-				AND EXTRACT(MONTH FROM created_at) = $2
-				AND booking_status = 'ACTIVE'
-				AND created_by IS NOT NULL
-			GROUP BY created_by
+			FROM bookings b
+			LEFT JOIN vehicle_queue q ON q.id = NULLIF(b.queue_id, '')
+			LEFT JOIN routes r1 ON r1.station_id = b.destination_id
+			LEFT JOIN routes r2 ON r2.station_id = q.destination_id
+			WHERE EXTRACT(YEAR FROM b.created_at) = $1
+				AND EXTRACT(MONTH FROM b.created_at) = $2
+				AND b.booking_status = 'ACTIVE'
+				AND b.created_by IS NOT NULL
+			GROUP BY b.created_by
 		) booking_stats ON s.id = booking_stats.staff_id
 		LEFT JOIN (
 			SELECT 
 				created_by as staff_id,
 				COUNT(*) as total_day_passes_sold,
+				COALESCE(SUM(price), 0) as total_day_pass_income,
 				COUNT(*) as total_transactions
 			FROM day_passes 
-			WHERE EXTRACT(YEAR FROM purchase_date) = $1 
+			WHERE EXTRACT(YEAR FROM purchase_date) = $1
 				AND EXTRACT(MONTH FROM purchase_date) = $2
 				AND created_by IS NOT NULL
 			GROUP BY created_by
 		) daypass_stats ON s.id = daypass_stats.staff_id
 		WHERE s.is_active = true
 			AND (booking_stats.staff_id IS NOT NULL OR daypass_stats.staff_id IS NOT NULL)
-		ORDER BY ((COALESCE(booking_stats.total_seats_booked, 0) * 0.2) + (COALESCE(daypass_stats.total_day_passes_sold, 0) * 2.0)) DESC
+		ORDER BY (COALESCE(booking_stats.total_seat_income, 0) + COALESCE(daypass_stats.total_day_pass_income, 0)) DESC
 	`
 
 	// Create a date value for the month
@@ -871,7 +903,7 @@ func (r *RepositoryImpl) staffDestBreakdownQuery(ctx context.Context, dateClause
 			COALESCE(r1.station_name, r2.station_name, 'Inconnu') AS dest_name,
 			COALESCE(SUM(b.seats_booked), 0)::int AS seats_booked,
 			COALESCE(SUM(CASE WHEN b.is_ghost_booking THEN b.seats_booked ELSE 0 END), 0)::int AS ghost_bookings,
-			COALESCE(SUM(b.seats_booked * (COALESCE(r1.base_price, r2.base_price, 0) + 0.2)), 0) AS seat_income
+			COALESCE(SUM(b.seats_booked * (COALESCE(r1.base_price, r2.base_price, 0) + COALESCE(r1.service_fee, r2.service_fee, 0.2))), 0) AS seat_income
 		FROM bookings b
 		LEFT JOIN vehicle_queue q ON q.id = NULLIF(b.queue_id, '')
 		LEFT JOIN routes r1 ON r1.station_id = NULLIF(b.destination_id, '')

@@ -16,15 +16,13 @@ func NewService(repo Repository) *Service {
 	return &Service{repo: repo}
 }
 
-// LogSeatBooking logs a seat booking transaction
-func (s *Service) LogSeatBooking(ctx context.Context, staffID, bookingID, stationID string, seats int) error {
-	seatIncome := float64(seats) * pricing.ServiceFeePerSeatTND
-
+// LogSeatBooking logs a seat booking transaction (amount = per-destination station fee × seats).
+func (s *Service) LogSeatBooking(ctx context.Context, staffID, bookingID, stationID string, stationFeeTotal float64, seats int) error {
 	req := LogTransactionRequest{
 		StaffID:         staffID,
 		TransactionType: "SEAT_BOOKING",
 		TransactionID:   bookingID,
-		Amount:          seatIncome,
+		Amount:          stationFeeTotal,
 		Quantity:        seats,
 		StationID:       stationID,
 	}
@@ -34,12 +32,11 @@ func (s *Service) LogSeatBooking(ctx context.Context, staffID, bookingID, statio
 
 // LogDayPassSale logs a day pass sale transaction
 func (s *Service) LogDayPassSale(ctx context.Context, staffID, dayPassID, stationID string) error {
-	// Day pass income: 2 TND per day pass
 	req := LogTransactionRequest{
 		StaffID:         staffID,
 		TransactionType: "DAY_PASS_SALE",
 		TransactionID:   dayPassID,
-		Amount:          2.0,
+		Amount:          pricing.DayPassTotalPriceTND,
 		Quantity:        1,
 		StationID:       stationID,
 	}

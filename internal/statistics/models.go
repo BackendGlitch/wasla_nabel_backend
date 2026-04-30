@@ -123,9 +123,9 @@ type LogTransactionRequest struct {
 type ActualIncomeSummary struct {
 	Date                    time.Time `json:"date"`
 	SeatsBooked             int       `json:"seatsBooked"`
-	ActualSeatIncome        float64   `json:"actualSeatIncome"` // Base price + 0.2 TND (200 millimes) per seat
+	ActualSeatIncome        float64   `json:"actualSeatIncome"` // sum over seats: base_price + routes.service_fee (per destination, default 0.2 TND)
 	DayPassSales            int       `json:"dayPassSales"`
-	DayPassIncome           float64   `json:"dayPassIncome"`           // 2.0 per day pass
+	DayPassIncome           float64   `json:"dayPassIncome"`           // 1.5 TND per day pass (see pricing.DayPassTotalPriceTND)
 	TotalActualIncome       float64   `json:"totalActualIncome"`       // actualSeatIncome + dayPassIncome
 	SeatsWithoutDestination int       `json:"seatsWithoutDestination"` // bookings without queue/destination info
 }
