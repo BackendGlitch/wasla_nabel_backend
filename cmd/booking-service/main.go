@@ -52,6 +52,7 @@ func main() {
 		api.POST("/bookings", middleware.AuthRequired(), h.Create)
 		api.POST("/bookings/by-queue-entry", middleware.AuthRequired(), h.CreateByQueueEntry)
 		api.POST("/bookings/cancel-one-by-queue-entry", middleware.AuthRequired(), h.CancelOneByQueueEntry)
+		api.POST("/bookings/cancel-last-mine", middleware.AuthRequired(), h.CancelLastMine)
 		api.PUT("/bookings/:id/cancel", middleware.AuthRequired(), h.Cancel)
 		api.GET("/trips", middleware.AuthRequired(), h.ListTrips)
 		api.GET("/trips/today", middleware.AuthRequired(), h.ListTodayTrips)

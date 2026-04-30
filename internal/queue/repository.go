@@ -758,14 +758,89 @@ func (r *RepositoryImpl) UpdateQueueEntry(ctx context.Context, id string, req Up
 }
 
 func (r *RepositoryImpl) DeleteQueueEntry(ctx context.Context, id string) error {
-	ct, err := r.db.Exec(ctx, `DELETE FROM vehicle_queue WHERE id=$1`, id)
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	var (
+		vehicleID string
+		lp        string
+		destID    string
+		destName  string
+		totalSeats, availableSeats int
+		basePrice float64
+	)
+	err = tx.QueryRow(ctx, `
+		SELECT COALESCE(q.vehicle_id, ''),
+		       COALESCE(NULLIF(TRIM(v.license_plate), ''), NULLIF(TRIM(q.license_plate), ''), ''),
+		       q.destination_id,
+		       COALESCE(TRIM(q.destination_name), ''),
+		       q.total_seats,
+		       q.available_seats,
+		       COALESCE(r.base_price, q.base_price, 0)
+		FROM vehicle_queue q
+		LEFT JOIN vehicles v ON v.id = q.vehicle_id
+		LEFT JOIN routes r ON r.station_id = q.destination_id
+		WHERE q.id = $1
+		FOR UPDATE`, id).Scan(&vehicleID, &lp, &destID, &destName,
+		&totalSeats, &availableSeats, &basePrice)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return fmt.Errorf("queue entry not found")
+		}
+		return err
+	}
+
+	bookedSeats := totalSeats - availableSeats
+	if bookedSeats < 0 {
+		bookedSeats = 0
+	}
+
+	var tripExists bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM trips WHERE queue_id = $1)`, id).Scan(&tripExists); err != nil {
+		return err
+	}
+
+	var newTripID string
+	if !tripExists {
+		newTripID = fmt.Sprintf("trip_%d", time.Now().UnixNano())
+		// Match columns used by booking ListTodayTrips (booked_seats + seats_booked + vehicle_capacity + base_price + vehicle_id).
+		_, err = tx.Exec(ctx, `
+			INSERT INTO trips (
+				id, queue_id, destination_id, destination_name, license_plate,
+				start_time, created_at, total_seats, booked_seats, created_by,
+				vehicle_id, seats_booked, vehicle_capacity, base_price
+			) VALUES (
+				$1, $2, $3, NULLIF(TRIM($4), ''), COALESCE(NULLIF(TRIM($5), ''), 'UNKNOWN'),
+				NOW(), NOW(), $6, $7, $8,
+				NULLIF(TRIM($9), ''), $7, $6, $10
+			)`,
+			newTripID, id, destID, destName, lp,
+			totalSeats, bookedSeats, "management_queue_remove",
+			vehicleID, basePrice,
+		)
+		if err != nil {
+			return fmt.Errorf("insert trip before queue removal: %w", err)
+		}
+		// Detach from queue row before DELETE so FK ON DELETE CASCADE (if present) cannot delete this trip row.
+		if _, err := tx.Exec(ctx, `UPDATE trips SET queue_id = NULL WHERE id = $1`, newTripID); err != nil {
+			return fmt.Errorf("unlink trip after insert: %w", err)
+		}
+	} else if _, err := tx.Exec(ctx, `UPDATE trips SET queue_id = NULL WHERE queue_id = $1`, id); err != nil {
+		// Existing trip still points at this queue id (e.g. full-book flow); unlink before deleting the queue row.
+		return fmt.Errorf("unlink existing trips: %w", err)
+	}
+
+	ct, err := tx.Exec(ctx, `DELETE FROM vehicle_queue WHERE id=$1`, id)
 	if err != nil {
 		return err
 	}
 	if ct.RowsAffected() == 0 {
 		return fmt.Errorf("queue entry not found")
 	}
-	return nil
+	return tx.Commit(ctx)
 }
 
 func (r *RepositoryImpl) ClearQueue(ctx context.Context, destinationID string) error {

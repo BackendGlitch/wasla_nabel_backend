@@ -101,6 +101,10 @@ type TicketData struct {
 	// Company branding
 	CompanyName string `json:"companyName,omitempty"`
 	CompanyLogo string `json:"companyLogo,omitempty"`
+	// Booking slip Arabic header overrides (optional).
+	CompanyArabic       string   `json:"companyArabic,omitempty"`
+	StationArabic       string   `json:"stationArabic,omitempty"`
+	StationRoutesArabic []string `json:"stationRoutesArabic,omitempty"`
 	// Staff information
 	StaffFirstName string `json:"staffFirstName,omitempty"`
 	StaffLastName  string `json:"staffLastName,omitempty"`

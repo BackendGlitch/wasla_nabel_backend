@@ -2,6 +2,7 @@ package booking
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -16,6 +17,7 @@ type Repository interface {
 	CreateBookingByDestination(ctx context.Context, req CreateBookingByDestinationRequest) (*Booking, error)
 	CreateBookingByQueueEntry(ctx context.Context, req CreateBookingByQueueEntryRequest) (*CreateBookingByQueueEntryResponse, error)
 	CancelBooking(ctx context.Context, bookingID string, staffID string, reason *string) (*Booking, error)
+	CancelLastBookingForStaff(ctx context.Context, staffID string) (*Booking, error)
 	ListQueueSnapshot(ctx context.Context, destinationID string) ([]QueueEntry, error)
 	GetDestinationByQueueEntry(ctx context.Context, queueEntryID string) (string, error)
 	HasTripForQueue(ctx context.Context, queueID string) (bool, error)
@@ -41,6 +43,20 @@ type RepositoryImpl struct {
 }
 
 const verificationAttempts = 32
+
+// ErrCancelLastNoBooking means there is no eligible ACTIVE queued booking for the operator.
+var ErrCancelLastNoBooking = errors.New("no active queued booking found for this operator")
+
+// ErrCancelLastQueueMissing means vehicle_queue row is gone and trips offer no usable exit audit within policy.
+var ErrCancelLastQueueMissing = errors.New("cannot cancel: vehicle_queue row missing; no qualifying exit-trip audit for restore")
+
+// ErrCancelLastExitWindowExpired rejects undo after vehicle exited queue (time limit exceeded).
+var ErrCancelLastExitWindowExpired = errors.New("cannot cancel: more than 5 minutes since vehicle exited queue; refusing restore")
+
+// ErrCancelLastIncompleteAudit means we refuse to guess queue or vehicle linkage (consistency-first).
+var ErrCancelLastIncompleteAudit = errors.New("cannot cancel: missing vehicle linkage for exited queue restore")
+
+const cancelLastExitRestoreWindow = 5 * time.Minute
 
 func nullableText(v string) interface{} {
 	if strings.TrimSpace(v) == "" {
@@ -286,7 +302,9 @@ func (r *RepositoryImpl) resolveGhostDestination(ctx context.Context, tx pgx.Tx,
 
 func NewRepository(db *pgxpool.Pool) Repository { return &RepositoryImpl{db: db} }
 
-// CreateBookingByDestination allocates seats from the first queue entry with sufficient seats, else tries next entries in order
+// CreateBookingByDestination allocates seats on a single vehicle.
+// When PreferExactFit=true, it first searches an exact-seat match, then falls back to first-eligible.
+// When PreferExactFit=false, it directly uses first-eligible by queue order.
 func (r *RepositoryImpl) CreateBookingByDestination(ctx context.Context, req CreateBookingByDestinationRequest) (*Booking, error) {
 	if req.Seats <= 0 {
 		return nil, fmt.Errorf("seats must be > 0")
@@ -311,12 +329,12 @@ func (r *RepositoryImpl) CreateBookingByDestination(ctx context.Context, req Cre
 		}
 	}
 
-	// Always try exact-fit first, then fall back to first-eligible
+	// Try exact-fit only when requested, then fall back to first-eligible.
 	var row pgx.Row
 	var queueID, vehicleID string
 	var pricePerSeat float64
 	var serviceFeePerSeat float64
-	{
+	if req.PreferExactFit {
 		if req.SubRoute != nil && *req.SubRoute != "" {
 			row = tx.QueryRow(ctx, `
                 WITH candidate AS (
@@ -365,7 +383,7 @@ func (r *RepositoryImpl) CreateBookingByDestination(ctx context.Context, req Cre
 		}
 	}
 
-	// If exact-fit not requested or not found, fall back to first-eligible
+	// If exact-fit wasn't used or didn't find a candidate, fall back to first-eligible.
 	if queueID == "" {
 		if req.SubRoute != nil && *req.SubRoute != "" {
 			row = tx.QueryRow(ctx, `
@@ -551,6 +569,15 @@ func (r *RepositoryImpl) CancelBooking(ctx context.Context, bookingID string, st
 			if _, derr := tx.Exec(ctx, `DELETE FROM trips WHERE queue_id = $1`, vehicleID); derr != nil {
 				return nil, derr
 			}
+			var exitPassesTable bool
+			if err := tx.QueryRow(ctx, `SELECT to_regclass('public.exit_passes') IS NOT NULL`).Scan(&exitPassesTable); err != nil {
+				return nil, err
+			}
+			if exitPassesTable {
+				if _, err := tx.Exec(ctx, `DELETE FROM exit_passes WHERE queue_id = $1`, vehicleID); err != nil {
+					return nil, err
+				}
+			}
 		}
 	}
 
@@ -603,6 +630,235 @@ func (r *RepositoryImpl) CancelOneBookingByQueueEntry(ctx context.Context, queue
 		return nil, err
 	}
 	return r.CancelBooking(ctx, bookingID, staffID, nil)
+}
+
+// CancelLastBookingForStaff resolves the operator's latest regular (queued) seat booking.
+//
+// Constraints (consistency-first):
+//   - is_ghost_booking rows are skipped (separate undo flow later).
+//   - If vehicle_queue exists: delegates to CancelBooking (seat restore + trip/exit-pass cleanup).
+//   - If vehicle_queue row is missing: only when a trips row exists for queue_id (exit audit).
+//     Reinsert uses trip fields + restores available_seats from remaining ACTIVE bookings (after cancelling this row).
+//     Queue position is append-only (destination MAX+1), not reconstructed — consistency over original slot.
+//     Exit must be within cancelLastExitRestoreWindow since trip.start_time; otherwise ErrCancelLastExitWindowExpired (no DB mutations).
+//
+// Revenue / analytics are not reversed here by design.
+func (r *RepositoryImpl) CancelLastBookingForStaff(ctx context.Context, staffID string) (*Booking, error) {
+	if strings.TrimSpace(staffID) == "" {
+		return nil, fmt.Errorf("staff id required")
+	}
+
+	var bookingID, queueID string
+	err := r.db.QueryRow(ctx, `
+		SELECT id, TRIM(queue_id)
+		FROM bookings
+		WHERE created_by = $1
+		  AND booking_status = 'ACTIVE'
+		  AND COALESCE(is_ghost_booking, false) = false
+		  AND queue_id IS NOT NULL
+		  AND TRIM(queue_id) <> ''
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, staffID).Scan(&bookingID, &queueID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrCancelLastNoBooking
+		}
+		return nil, err
+	}
+
+	var queueExists bool
+	if err := r.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM vehicle_queue WHERE id = $1)`, queueID).Scan(&queueExists); err != nil {
+		return nil, err
+	}
+	if queueExists {
+		reason := "cancel_last_operator"
+		return r.CancelBooking(ctx, bookingID, staffID, &reason)
+	}
+
+	return r.cancelLastBookingAfterQueueRemoved(ctx, staffID, bookingID, queueID)
+}
+
+// cancelLastBookingAfterQueueRemoved reinserts vehicle_queue only when trips prove a recent exit.
+func (r *RepositoryImpl) cancelLastBookingAfterQueueRemoved(ctx context.Context, staffID string, bookingID, queueID string) (*Booking, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	var scanID string
+	var status string
+	var createdBy string
+	var ghost bool
+	var qref string
+	if err := tx.QueryRow(ctx, `
+		SELECT id, booking_status, created_by,
+		       COALESCE(is_ghost_booking, false), TRIM(queue_id)
+		FROM bookings WHERE id=$1 FOR UPDATE`,
+		bookingID).Scan(&scanID, &status, &createdBy, &ghost, &qref); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrCancelLastNoBooking
+		}
+		return nil, err
+	}
+	if status != "ACTIVE" {
+		return nil, fmt.Errorf("booking already %s", status)
+	}
+	if ghost {
+		return nil, ErrCancelLastNoBooking
+	}
+	if createdBy != staffID {
+		return nil, ErrCancelLastNoBooking
+	}
+	if qref != queueID {
+		return nil, ErrCancelLastNoBooking
+	}
+
+	var destID, destName, licensePlate string
+	var startTime time.Time
+	var totalSeats int
+	var tripVehicleID sql.NullString
+
+	err = tx.QueryRow(ctx, `
+		SELECT destination_id, destination_name, license_plate, start_time, total_seats, vehicle_id
+		FROM trips
+		WHERE queue_id = $1
+		ORDER BY start_time DESC, created_at DESC
+		LIMIT 1`,
+		queueID).Scan(&destID, &destName, &licensePlate, &startTime, &totalSeats, &tripVehicleID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrCancelLastQueueMissing
+		}
+		return nil, err
+	}
+
+	exitAt := startTime.UTC()
+	if time.Now().UTC().Sub(exitAt) > cancelLastExitRestoreWindow {
+		return nil, ErrCancelLastExitWindowExpired
+	}
+
+	vehicleIDResolved := ""
+	if tripVehicleID.Valid && strings.TrimSpace(tripVehicleID.String) != "" {
+		vehicleIDResolved = strings.TrimSpace(tripVehicleID.String)
+	}
+	if vehicleIDResolved == "" {
+		key := normalizeLicensePlateKey(licensePlate)
+		if key == "" {
+			return nil, ErrCancelLastIncompleteAudit
+		}
+		if err := tx.QueryRow(ctx, `
+			SELECT id::text FROM vehicles
+			WHERE REPLACE(UPPER(TRIM(COALESCE(license_plate, ''))), ' ', '') = $1
+			LIMIT 1`, key).Scan(&vehicleIDResolved); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, ErrCancelLastIncompleteAudit
+			}
+			return nil, err
+		}
+	}
+
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('vehicle_queue:' || $1::text))`, destID); err != nil {
+		return nil, err
+	}
+
+	var nextPos int
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(MAX(queue_position), 0) + 1
+		FROM vehicle_queue WHERE destination_id = $1`, destID).Scan(&nextPos); err != nil {
+		return nil, err
+	}
+
+	var basePrice float64
+	qErr := tx.QueryRow(ctx, `SELECT COALESCE(r.base_price, 0) FROM routes r WHERE r.station_id = $1 LIMIT 1`, destID).Scan(&basePrice)
+	if qErr != nil && errors.Is(qErr, pgx.ErrNoRows) {
+		basePrice = 15
+		qErr = nil
+	}
+	if qErr != nil {
+		return nil, qErr
+	}
+	if basePrice <= 0 {
+		basePrice = 15
+	}
+
+	reason := "cancel_last_operator"
+	if _, err := tx.Exec(ctx, `
+		UPDATE bookings SET booking_status='CANCELLED', cancelled_at=NOW(), cancelled_by=$2, cancellation_reason=$3
+		WHERE id=$1 AND booking_status='ACTIVE'`, bookingID, staffID, reason); err != nil {
+		return nil, err
+	}
+
+	var remainingActiveSeatSum int64
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(SUM(seats_booked), 0)::bigint
+		FROM bookings
+		WHERE queue_id = $1 AND booking_status = 'ACTIVE'`,
+		queueID).Scan(&remainingActiveSeatSum); err != nil {
+		return nil, err
+	}
+
+	availInserted := totalSeats - int(remainingActiveSeatSum)
+	if availInserted < 0 {
+		availInserted = 0
+	}
+	if availInserted > totalSeats {
+		availInserted = totalSeats
+	}
+
+	var queueStatus string
+	switch {
+	case availInserted == 0:
+		queueStatus = "READY"
+	case availInserted < totalSeats:
+		queueStatus = "LOADING"
+	default:
+		queueStatus = "WAITING"
+	}
+
+	if _, err := tx.Exec(ctx, `DELETE FROM trips WHERE queue_id = $1`, queueID); err != nil {
+		return nil, err
+	}
+
+	var exitPassesTable bool
+	if err := tx.QueryRow(ctx, `SELECT to_regclass('public.exit_passes') IS NOT NULL`).Scan(&exitPassesTable); err != nil {
+		return nil, err
+	}
+	if exitPassesTable {
+		if _, err := tx.Exec(ctx, `DELETE FROM exit_passes WHERE queue_id = $1`, queueID); err != nil {
+			return nil, err
+		}
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO vehicle_queue (
+			id, vehicle_id, license_plate, destination_id, destination_name,
+			sub_route, sub_route_name, queue_type, queue_position, status,
+			entered_at, available_seats, total_seats, base_price
+		) VALUES (
+			$1, $2, $3, $4, $5, NULL, NULL, 'REGULAR', $6, $7, NOW(),
+			$8, $9, $10
+		)`,
+		queueID, vehicleIDResolved, licensePlate, destID, destName, nextPos,
+		queueStatus, availInserted, totalSeats, basePrice); err != nil {
+		return nil, err
+	}
+
+	var b Booking
+	if err := tx.QueryRow(ctx, `
+		SELECT id, seats_booked, total_amount, booking_status, payment_status, verification_code, created_by, created_at
+		FROM bookings WHERE id=$1`, bookingID).Scan(
+		&b.ID, &b.SeatsBooked, &b.TotalAmount, &b.BookingStatus, &b.PaymentStatus, &b.VerificationCode, &b.CreatedBy, &b.CreatedAt,
+	); err != nil {
+		return nil, err
+	}
+	b.QueueID = queueID
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return &b, nil
 }
 
 // ListQueueSnapshot returns the current queue for a destination (minimal columns for UI refresh)

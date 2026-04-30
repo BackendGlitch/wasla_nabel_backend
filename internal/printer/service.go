@@ -708,88 +708,15 @@ func talonTopRightStar(width int) string {
 
 // Generate ticket content methods
 func (s *Service) generateBookingTicketContent(data *TicketData) string {
-	var content strings.Builder
-	content.WriteString("{{CENTER_SMALL:BILLET CLIENT}}\n")
-	content.WriteString(fmt.Sprintf("{{CENTER_SMALL:%s}}\n", strings.ToUpper(companyNameForTicket(data))))
-	content.WriteString("------------------------------\n")
-	content.WriteString(fmt.Sprintf("Dir: %s\n", data.DestinationName))
-	content.WriteString(fmt.Sprintf("Voit: %s\n", strings.TrimSpace(data.LicensePlate)))
-	content.WriteString(fmt.Sprintf("Siege: %d\n", data.SeatNumber))
-
-	if data.BasePrice > 0 {
-		fee := resolveServiceFeePerSeat(data)
-		baseLine := data.BasePrice
-		if data.TotalAmount > 0 && data.BasePrice <= 0 {
-			baseLine = data.TotalAmount - fee
-			if baseLine < 0 {
-				baseLine = 0
-			}
-		}
-		content.WriteString(fmt.Sprintf("Base: %.2f  Frais: %.2f\n", baseLine, fee))
-		content.WriteString(fmt.Sprintf("TOTAL: %.2f TND\n", baseLine+fee))
-	} else {
-		content.WriteString(fmt.Sprintf("TOTAL: %.2f TND\n", data.TotalAmount))
-	}
-	content.WriteString(fmt.Sprintf("Heure: %s\n", data.CreatedAt.Format("15:04")))
-	content.WriteString(fmt.Sprintf("Agent: %s\n", agentLineForTicket(data)))
-	content.WriteString("------------------------------\n")
-	// Keep only a tiny safety feed before cut to avoid visible top/bottom white gaps.
-	content.WriteString("{{FEED_BEFORE_CUT}}\n")
-	content.WriteString("{{PARTIAL_CUT}}\n")
-
-	// Seat first (above talon divider), then divider, then LP + footer (compact spacing).
-	if data.FirstTripOfDay {
-		content.WriteString("{{TALON_TOP_RIGHT_STAR}}\n")
-	}
-	content.WriteString(fmt.Sprintf("{{TALON_SEAT_PROMINENT:%d}}\n", data.SeatNumber))
-	content.WriteString("------------------------------\n")
-	content.WriteString("{{TALON_COMPACT_ON}}\n")
-	content.WriteString(fmt.Sprintf("{{TALON_LP_BIG:%s}}\n", strings.TrimSpace(data.LicensePlate)))
-	content.WriteString(fmt.Sprintf("Agent: %s\n", agentLineForTicket(data)))
-	content.WriteString(fmt.Sprintf("{{TALON_BOTTOM_ROW:%s|%s}}\n", data.CreatedAt.Format("15:04"), data.DestinationName))
-	content.WriteString("------------------------------\n")
-	content.WriteString("{{TALON_COMPACT_OFF}}\n")
-
-	return content.String()
+	return RenderFrenchBookingTicket(data)
 }
 
 func (s *Service) generateEntryTicketContent(data *TicketData) string {
-	var content strings.Builder
-
-	// Compact ticket title
-	content.WriteString("BILLET D'ENTRÉE\n")
-	content.WriteString("--------------------------------\n")
-
-	// Essential information in compact format
-	content.WriteString(fmt.Sprintf("Vehicule: %s\n", data.LicensePlate))
-	content.WriteString(fmt.Sprintf("Route: %s\n", data.RouteName))
-	content.WriteString(fmt.Sprintf("Date: %s\n", data.CreatedAt.Format("02/01/2006 15:04")))
-	content.WriteString(fmt.Sprintf("Agent: %s\n", agentLineForTicket(data)))
-	// Compact footer
-	content.WriteString("--------------------------------\n")
-	content.WriteString("Bon voyage!\n")
-
-	return content.String()
+	return RenderFrenchEntryTicket(data)
 }
 
 func (s *Service) generateExitTicketContent(data *TicketData) string {
-	var content strings.Builder
-
-	// Compact ticket title
-	content.WriteString("BILLET DE SORTIE\n")
-	content.WriteString("--------------------------------\n")
-
-	// Essential information in compact format
-	content.WriteString(fmt.Sprintf("Vehicule: %s\n", data.LicensePlate))
-	content.WriteString(fmt.Sprintf("Route: %s\n", data.RouteName))
-	content.WriteString(fmt.Sprintf("Station: %s\n", data.StationName))
-	content.WriteString(fmt.Sprintf("Date: %s\n", data.CreatedAt.Format("02/01/2006 15:04")))
-	content.WriteString(fmt.Sprintf("Agent: %s\n", agentLineForTicket(data)))
-	// Compact footer
-	content.WriteString("--------------------------------\n")
-	content.WriteString("Merci!\n")
-
-	return content.String()
+	return RenderFrenchExitTripTicket(data)
 }
 
 func tunisLocationForTickets() *time.Location {
@@ -818,150 +745,29 @@ func formatTicketDT(t time.Time) string {
 }
 
 func (s *Service) generateDayPassTicketContent(data *TicketData) string {
-	var content strings.Builder
-
-	content.WriteString("BILLET PASS JOURNÉE\n")
-	content.WriteString("--------------------------------\n")
-
-	content.WriteString(fmt.Sprintf("Vehicule: %s\n", data.LicensePlate))
-	if strings.TrimSpace(data.RouteName) != "" {
-		content.WriteString(fmt.Sprintf("Route: %s\n", data.RouteName))
-	}
-
-	// Prix forfait pass journée affiché comme un seul montant (sans ligne « frais »).
-	content.WriteString(fmt.Sprintf("Montant: %.3f TND\n", pricing.DayPassTotalPriceTND))
-	content.WriteString("Pas de frais de service.\n")
-
-	purchAt := data.PurchaseDate
-	if purchAt.IsZero() {
-		purchAt = data.CreatedAt
-	}
-	if purchAt.IsZero() {
-		purchAt = time.Now()
-	}
-	validFrom, validUntil := data.ValidFrom, data.ValidUntil
-	if validFrom.IsZero() || validUntil.IsZero() {
-		vf, vt := tunisCalendarDayBounds(purchAt)
-		if validFrom.IsZero() {
-			validFrom = vf
-		}
-		if validUntil.IsZero() {
-			validUntil = vt
-		}
-	}
-
-	content.WriteString(fmt.Sprintf("Date d'achat: %s\n", formatTicketDT(purchAt)))
-	content.WriteString(fmt.Sprintf("Valide du %s\n", formatTicketDT(validFrom)))
-	content.WriteString(fmt.Sprintf("jusqu'au %s (fin de validité)\n", formatTicketDT(validUntil)))
-
-	content.WriteString(fmt.Sprintf("Agent: %s\n", agentLineForTicket(data)))
-	content.WriteString("--------------------------------\n")
-	content.WriteString("Merci!\n")
-
-	return content.String()
+	return RenderFrenchDayPassTicket(data)
 }
 
 func (s *Service) generateExitPassTicketContent(data *TicketData) string {
-	var content strings.Builder
-
-	// Compact ticket title with exit pass count in top right
-	content.WriteString("   🚪 BILLET AUTORISATION SORTIE")
-	// Add spaces to position exit pass count in top right (assuming 32 char width)
-	if data.ExitPassCount > 0 {
-		countSpaces := 32 - 30 - 4 // 32 total - "🚪 BILLET AUTORISATION SORTIE" (30) - count (4) = -2 spaces
-		for i := 0; i < countSpaces; i++ {
-			content.WriteString(" ")
-		}
-		content.WriteString(fmt.Sprintf("(%d)\n", data.ExitPassCount))
-	} else {
-		content.WriteString("\n")
-	}
-	content.WriteString("--------------------------------\n")
-
-	// Essential information in compact format
-	content.WriteString(fmt.Sprintf("Vehicule: %s\n", data.LicensePlate))
-	content.WriteString(fmt.Sprintf("Destination: %s\n", data.DestinationName))
-
-	// Detailed pricing breakdown for exit pass
-	if data.BasePrice > 0 && data.SeatNumber > 0 {
-		// Check if this is an empty vehicle (seatNumber equals vehicle capacity)
-		if data.VehicleCapacity > 0 && data.SeatNumber == data.VehicleCapacity {
-			// Empty vehicle: service fees only (200 millimes per seat × capacity)
-			serviceTotal := resolveServiceFeePerSeat(data) * float64(data.VehicleCapacity)
-			lineTotal := serviceTotal
-
-			content.WriteString(fmt.Sprintf("Capacité véhicule: %d sièges\n", data.VehicleCapacity))
-			content.WriteString(fmt.Sprintf("Frais de services: %.2f TND\n", serviceTotal))
-			content.WriteString(fmt.Sprintf("Total: %.2f TND\n", lineTotal))
-		} else {
-			// Vehicle with bookings: base + fees + total
-			baseTotal := data.BasePrice * float64(data.SeatNumber)
-			serviceTotal := resolveServiceFeePerSeat(data) * float64(data.SeatNumber)
-			lineTotal := baseTotal + serviceTotal
-
-			content.WriteString(fmt.Sprintf("Sièges réservés: %d\n", data.SeatNumber))
-			content.WriteString(fmt.Sprintf("Prix de base: %.2f TND\n", baseTotal))
-			content.WriteString(fmt.Sprintf("Frais de services: %.2f TND\n", serviceTotal))
-			content.WriteString(fmt.Sprintf("Total: %.2f TND\n", lineTotal))
-		}
-	} else if data.BasePrice > 0 && data.VehicleCapacity > 0 {
-		// Fallback to vehicle capacity if seat number not available
-		baseTotal := data.BasePrice * float64(data.VehicleCapacity)
-		serviceTotal := resolveServiceFeePerSeat(data) * float64(data.VehicleCapacity)
-		lineTotal := baseTotal + serviceTotal
-
-		content.WriteString(fmt.Sprintf("Capacité véhicule: %d sièges\n", data.VehicleCapacity))
-		content.WriteString(fmt.Sprintf("Prix de base: %.2f TND\n", baseTotal))
-		content.WriteString(fmt.Sprintf("Frais de services: %.2f TND\n", serviceTotal))
-		content.WriteString(fmt.Sprintf("Total: %.2f TND\n", lineTotal))
-	} else {
-		content.WriteString(fmt.Sprintf("Total: %.2f TND\n", data.TotalAmount))
-	}
-
-	content.WriteString(fmt.Sprintf("Date: %s\n", data.CreatedAt.Format("02/01/2006 15:04")))
-	content.WriteString(fmt.Sprintf("Agent: %s\n", agentLineForTicket(data)))
-	// Compact footer
-	content.WriteString("--------------------------------\n")
-	content.WriteString("🚪 Sortie autorisée!\n")
-
-	return content.String()
+	return RenderFrenchExitPassTicket(data)
 }
 
 func (s *Service) generateTalonContent(data *TicketData) string {
-	var content strings.Builder
-	if data.FirstTripOfDay {
-		content.WriteString("{{TALON_TOP_RIGHT_STAR}}\n")
-	}
-	content.WriteString(fmt.Sprintf("{{TALON_SEAT_PROMINENT:%d}}\n", data.SeatNumber))
-	content.WriteString("------------------------------\n")
-	content.WriteString("{{TALON_COMPACT_ON}}\n")
-	content.WriteString(fmt.Sprintf("{{TALON_LP_BIG:%s}}\n", strings.TrimSpace(data.LicensePlate)))
-	content.WriteString(fmt.Sprintf("Agent: %s\n", agentLineForTicket(data)))
-	content.WriteString(fmt.Sprintf("{{TALON_BOTTOM_ROW:%s|%s}}\n", data.CreatedAt.Format("15:04"), data.DestinationName))
-	content.WriteString("------------------------------\n")
-	content.WriteString("{{TALON_COMPACT_OFF}}\n")
-
-	return content.String()
+	return RenderFrenchTalonOnly(data)
 }
 
 func (s *Service) generateStandardTicketContent(data *TicketData) string {
-	var content strings.Builder
+	return RenderFrenchStandardTicket(data)
+}
 
-	// Compact ticket title
-	content.WriteString("BILLET STANDARD\n")
-	content.WriteString("--------------------------------\n")
-
-	// Essential information in compact format
-	content.WriteString(fmt.Sprintf("Vehicule: %s\n", data.LicensePlate))
-	content.WriteString(fmt.Sprintf("Destination: %s\n", data.DestinationName))
-	content.WriteString(fmt.Sprintf("Montant: %.2f TND\n", data.TotalAmount))
-	content.WriteString(fmt.Sprintf("Date: %s\n", data.CreatedAt.Format("02/01/2006 15:04")))
-	content.WriteString(fmt.Sprintf("Agent: %s\n", agentLineForTicket(data)))
-	// Compact footer
-	content.WriteString("--------------------------------\n")
-	content.WriteString("Merci!\n")
-
-	return content.String()
+func frenchSepDashWidth(width int) int {
+	if width <= 0 {
+		return 32
+	}
+	if width > 48 {
+		return 48
+	}
+	return width
 }
 
 // Convert text content to ESC/POS commands
@@ -1019,6 +825,33 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 	// Print content
 	lines := strings.Split(content, "\n")
 	for _, line := range lines {
+		if tryConsumeArabEscPosDirective(&buffer, line, paperWidth, isCompactTalon) {
+			continue
+		}
+
+		if line == "{{FR_SEP}}" {
+			resetStyle()
+			w := frenchSepDashWidth(paperWidth)
+			buffer.WriteString(strings.Repeat("-", w))
+			buffer.WriteByte(0x0A)
+			continue
+		}
+		if strings.HasPrefix(line, "{{FR_CENTER_TITLE:") && strings.HasSuffix(line, "}}") {
+			raw := strings.TrimSuffix(strings.TrimPrefix(line, "{{FR_CENTER_TITLE:"), "}}")
+			resetStyle()
+			setAlign(0x01)
+			setTextStyle(0x08)
+			setTextScale(0x00)
+			buffer.WriteString(raw)
+			buffer.WriteByte(0x0A)
+			resetStyle()
+			if isCompactTalon {
+				buffer.Write([]byte{0x1B, 0x4D, 0x01})
+				buffer.Write([]byte{0x1B, 0x33, 18})
+			}
+			continue
+		}
+
 		if line == "{{TALON_TOP_RIGHT_STAR}}" {
 			resetStyle()
 			setAlign(0x00)
@@ -1066,6 +899,123 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 				buffer.WriteByte(0x0A)
 			}
 			resetStyle()
+			continue
+		}
+		if line == "{{SHORT_FEED_BEFORE_CUT}}" {
+			buffer.WriteByte(0x0A)
+			resetStyle()
+			continue
+		}
+		if line == "{{PASSENGER_PRE_PARTIAL_FEED}}" {
+			// Blank line feeds only (no spacer text) — short tail before partial cut after footer.
+			for range 4 {
+				buffer.WriteByte(0x0A)
+			}
+			resetStyle()
+			continue
+		}
+		if strings.HasPrefix(line, "{{FR_LF_ONLY:") && strings.HasSuffix(line, "}}") {
+			inner := strings.TrimSuffix(strings.TrimPrefix(line, "{{FR_LF_ONLY:"), "}}")
+			n, err := strconv.Atoi(strings.TrimSpace(inner))
+			if err != nil || n < 1 {
+				n = 1
+			}
+			if n > 16 {
+				n = 16
+			}
+			for range n {
+				buffer.WriteByte(0x0A)
+			}
+			// Preserve compact Font B + tight spacing after naked feeds.
+			if isCompactTalon {
+				buffer.Write([]byte{0x1B, 0x4D, 0x01})
+				buffer.Write([]byte{0x1B, 0x33, 18})
+			}
+			continue
+		}
+
+		recompactFrench := func() {
+			if isCompactTalon {
+				buffer.Write([]byte{0x1B, 0x4D, 0x01})
+				buffer.Write([]byte{0x1B, 0x33, 18})
+			}
+		}
+		useFontABriefly := func() {
+			buffer.Write([]byte{0x1B, 0x4D, 0x00})
+			buffer.Write([]byte{0x1B, 0x32})
+			resetStyle()
+		}
+
+		// Passenger + talon: double width × double height centered "SIEGE n" (main visual anchor).
+		if strings.HasPrefix(line, "{{FR_SEAT_FOCUS:") && strings.HasSuffix(line, "}}") {
+			raw := strings.TrimSuffix(strings.TrimPrefix(line, "{{FR_SEAT_FOCUS:"), "}}")
+			n, err := strconv.Atoi(strings.TrimSpace(raw))
+			if err != nil || n <= 0 {
+				recompactFrench()
+				continue
+			}
+			wasCompact := isCompactTalon
+			if wasCompact {
+				useFontABriefly()
+			} else {
+				resetStyle()
+			}
+			setAlign(0x01)
+			setTextStyle(0x08)
+			setTextScale(0x22)
+			buffer.WriteString(fmt.Sprintf("SIEGE %d", n))
+			buffer.WriteByte(0x0A)
+			resetStyle()
+			if wasCompact {
+				useFontABriefly()
+				recompactFrench()
+			}
+			continue
+		}
+
+		// Bold medium scale (typically vehicle line on passenger slip).
+		if strings.HasPrefix(line, "{{FR_VEH_MEDIUM:") && strings.HasSuffix(line, "}}") {
+			raw := strings.TrimSuffix(strings.TrimPrefix(line, "{{FR_VEH_MEDIUM:"), "}}")
+			raw = strings.TrimSpace(raw)
+			if raw == "" {
+				recompactFrench()
+				continue
+			}
+			wasCompact := isCompactTalon
+			if wasCompact {
+				useFontABriefly()
+			} else {
+				resetStyle()
+			}
+			setAlign(0x01)
+			setTextStyle(0x08)
+			setTextScale(0x11)
+			buffer.WriteString(raw)
+			buffer.WriteByte(0x0A)
+			resetStyle()
+			if wasCompact {
+				useFontABriefly()
+				recompactFrench()
+			}
+			continue
+		}
+
+		// Centered bold normal size (tarif emphasis on passenger ticket).
+		if strings.HasPrefix(line, "{{FR_BOLD_LINE:") && strings.HasSuffix(line, "}}") {
+			raw := strings.TrimSuffix(strings.TrimPrefix(line, "{{FR_BOLD_LINE:"), "}}")
+			raw = strings.TrimSpace(raw)
+			if raw == "" {
+				recompactFrench()
+				continue
+			}
+			resetStyle()
+			setAlign(0x01)
+			setTextStyle(0x08)
+			setTextScale(0x00)
+			buffer.WriteString(raw)
+			buffer.WriteByte(0x0A)
+			resetStyle()
+			recompactFrench()
 			continue
 		}
 
@@ -1200,8 +1150,8 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 
 	resetStyle()
 
-	// Keep a moderate tail feed so the talon fully clears the cutter before the final cut.
-	for range 4 {
+	// Shorter tail feed before final cut — saves paper on compact booking + talon jobs.
+	for range 2 {
 		buffer.WriteByte(0x0A)
 	}
 

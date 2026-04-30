@@ -2,6 +2,7 @@ package booking
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -74,6 +75,33 @@ func (h *Handler) CancelOneByQueueEntry(c *gin.Context) {
 		return
 	}
 	utils.SuccessResponse(c, http.StatusOK, "Booking cancelled", b)
+}
+
+// CancelLastMine cancels the logged-in operator's most recent active queued (non-ghost) booking.
+func (h *Handler) CancelLastMine(c *gin.Context) {
+	sid, ok := c.Get("staff_id")
+	if !ok {
+		utils.UnauthorizedResponse(c, "staff context missing")
+		return
+	}
+	staffID, ok2 := sid.(string)
+	if !ok2 || staffID == "" {
+		utils.UnauthorizedResponse(c, "invalid staff context")
+		return
+	}
+	b, err := h.service.CancelLastBookingForStaff(context.Background(), staffID)
+	if err != nil {
+		if errors.Is(err, ErrCancelLastNoBooking) ||
+			errors.Is(err, ErrCancelLastQueueMissing) ||
+			errors.Is(err, ErrCancelLastExitWindowExpired) ||
+			errors.Is(err, ErrCancelLastIncompleteAudit) {
+			utils.BadRequestResponse(c, err.Error())
+			return
+		}
+		utils.InternalServerErrorResponse(c, "Failed to cancel last booking", err)
+		return
+	}
+	utils.SuccessResponse(c, http.StatusOK, "Last booking cancelled", b)
 }
 
 func (h *Handler) Cancel(c *gin.Context) {

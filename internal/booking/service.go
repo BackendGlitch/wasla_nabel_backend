@@ -170,6 +170,32 @@ func (s *Service) CancelOneBookingByQueueEntry(ctx context.Context, req CancelOn
 	return b, err
 }
 
+// CancelLastBookingForStaff cancels the most recent ACTIVE non-ghost booking created by the given staff member.
+func (s *Service) CancelLastBookingForStaff(ctx context.Context, staffID string) (*Booking, error) {
+	b, err := s.repo.CancelLastBookingForStaff(ctx, staffID)
+	if err == nil && s.ws != nil {
+		if destID, derr := s.repo.GetDestinationByQueueEntry(ctx, b.QueueID); derr == nil {
+			s.ws.BroadcastToStation(destID, events.QueueUpdated, map[string]interface{}{"bookingId": b.ID})
+			if queue, qerr := s.repo.ListQueueSnapshot(ctx, destID); qerr == nil {
+				s.ws.BroadcastToStation(destID, events.QueueEntryUpdated, map[string]interface{}{
+					"queue": queue,
+				})
+			}
+			s.ws.BroadcastToStation(destID, events.QueueEntryUpdated, map[string]interface{}{
+				"queueId": b.QueueID,
+			})
+			if hasTrip, terr := s.repo.HasTripForQueue(ctx, b.QueueID); terr == nil && !hasTrip {
+				s.ws.BroadcastToStation(destID, events.QueueUpdated, map[string]interface{}{
+					"queueId": b.QueueID,
+				})
+			}
+		} else {
+			s.ws.BroadcastToStation("*", events.QueueUpdated, map[string]interface{}{"bookingId": b.ID})
+		}
+	}
+	return b, err
+}
+
 func (s *Service) CreateGhostBooking(ctx context.Context, req CreateGhostBookingRequest) ([]*GhostBooking, error) {
 	bookings, err := s.repo.CreateGhostBooking(ctx, req)
 	if err == nil && len(bookings) > 0 {
