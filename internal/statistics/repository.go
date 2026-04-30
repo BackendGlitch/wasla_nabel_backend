@@ -10,7 +10,14 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"station-backend/internal/pricing"
 )
+
+// dayPassStatsIncomeByCount is SQL for day-pass money in reports: count × list price.
+// Intentionally not SUM(day_passes.price) so historical rows at 2.0 TND do not inflate stats after a tariff change.
+func dayPassStatsIncomeByCount() string {
+	return fmt.Sprintf("(COUNT(*)::double precision * %g::double precision)", pricing.DayPassTotalPriceTND)
+}
 
 type Repository interface {
 	LogTransaction(ctx context.Context, req LogTransactionRequest) error
@@ -141,7 +148,7 @@ func (r *RepositoryImpl) getStaffDailyIncomeFallback(ctx context.Context, staffI
 			SELECT
 				created_by::text as staff_id,
 				COUNT(*)::int as total_day_passes_sold,
-				COALESCE(SUM(price), 0.00) as total_day_pass_income,
+			` + dayPassStatsIncomeByCount() + ` as total_day_pass_income,
 				COUNT(*)::int as total_transactions
 			FROM day_passes
 			WHERE DATE(purchase_date) = $2
@@ -391,7 +398,7 @@ func (r *RepositoryImpl) GetAllStaffIncomeForDate(ctx context.Context, date time
 			SELECT 
 				created_by as staff_id,
 				COUNT(*) as total_day_passes_sold,
-				COALESCE(SUM(price), 0) as total_day_pass_income,
+			` + dayPassStatsIncomeByCount() + ` as total_day_pass_income,
 				COUNT(*) as total_transactions
 			FROM day_passes 
 			WHERE DATE(purchase_date) = $1
@@ -604,7 +611,7 @@ func (r *RepositoryImpl) GetActualIncomeForDate(ctx context.Context, date time.T
 				AND b.booking_status = 'ACTIVE'
 		),
 		day_passes_today AS (
-			SELECT COUNT(*)::bigint as cnt, COALESCE(SUM(price), 0) as revenue
+			SELECT COUNT(*)::bigint as cnt, ` + dayPassStatsIncomeByCount() + ` as revenue
 			FROM day_passes
 			WHERE DATE(purchase_date) = $1
 		)
@@ -654,7 +661,7 @@ func (r *RepositoryImpl) GetActualIncomeForPeriod(ctx context.Context, startTime
 				AND b.booking_status = 'ACTIVE'
 		),
 		day_passes_period AS (
-			SELECT COUNT(*)::bigint as cnt, COALESCE(SUM(price), 0) as revenue
+			SELECT COUNT(*)::bigint as cnt, ` + dayPassStatsIncomeByCount() + ` as revenue
 			FROM day_passes
 			WHERE purchase_date >= $1::timestamp
 				AND purchase_date <= $2::timestamp
@@ -705,7 +712,7 @@ func (r *RepositoryImpl) GetActualIncomeForMonth(ctx context.Context, year, mont
 				AND b.booking_status = 'ACTIVE'
 		),
 		day_passes_month AS (
-			SELECT COUNT(*)::bigint as cnt, COALESCE(SUM(price), 0) as revenue
+			SELECT COUNT(*)::bigint as cnt, ` + dayPassStatsIncomeByCount() + ` as revenue
 			FROM day_passes
 			WHERE EXTRACT(YEAR FROM purchase_date) = $1
 				AND EXTRACT(MONTH FROM purchase_date) = $2
@@ -780,7 +787,7 @@ func (r *RepositoryImpl) GetAllStaffIncomeForMonth(ctx context.Context, year, mo
 			SELECT 
 				created_by as staff_id,
 				COUNT(*) as total_day_passes_sold,
-				COALESCE(SUM(price), 0) as total_day_pass_income,
+			` + dayPassStatsIncomeByCount() + ` as total_day_pass_income,
 				COUNT(*) as total_transactions
 			FROM day_passes 
 			WHERE EXTRACT(YEAR FROM purchase_date) = $1
