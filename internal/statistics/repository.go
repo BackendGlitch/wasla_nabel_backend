@@ -126,12 +126,12 @@ func (r *RepositoryImpl) getStaffDailyIncomeFallback(ctx context.Context, staffI
 			SELECT
 				b.created_by::text as staff_id,
 				SUM(b.seats_booked)::int as total_seats_booked,
-				SUM(b.seats_booked * COALESCE(r1.service_fee, r2.service_fee, 0.2)) as total_seat_income,
+				SUM(b.seats_booked * (COALESCE(r1.base_price, r2.base_price, 0) + COALESCE(r1.service_fee, r2.service_fee, 0.2))) as total_seat_income,
 				COUNT(*)::int as total_transactions
 			FROM bookings b
 			LEFT JOIN vehicle_queue q ON q.id = NULLIF(b.queue_id, '')
-			LEFT JOIN routes r1 ON r1.station_id = b.destination_id
-			LEFT JOIN routes r2 ON r2.station_id = q.destination_id
+			LEFT JOIN routes r1 ON r1.station_id = NULLIF(b.destination_id, '')
+			LEFT JOIN routes r2 ON r2.station_id = NULLIF(q.destination_id, '')
 			WHERE DATE(b.created_at) = $2
 				AND b.booking_status = 'ACTIVE'
 				AND b.created_by IS NOT NULL
@@ -375,12 +375,12 @@ func (r *RepositoryImpl) GetAllStaffIncomeForDate(ctx context.Context, date time
 			SELECT 
 				b.created_by as staff_id,
 				SUM(b.seats_booked) as total_seats_booked,
-				SUM(b.seats_booked * COALESCE(r1.service_fee, r2.service_fee, 0.2)) as total_seat_income,
+				SUM(b.seats_booked * (COALESCE(r1.base_price, r2.base_price, 0) + COALESCE(r1.service_fee, r2.service_fee, 0.2))) as total_seat_income,
 				COUNT(*) as total_transactions
 			FROM bookings b
 			LEFT JOIN vehicle_queue q ON q.id = NULLIF(b.queue_id, '')
-			LEFT JOIN routes r1 ON r1.station_id = b.destination_id
-			LEFT JOIN routes r2 ON r2.station_id = q.destination_id
+			LEFT JOIN routes r1 ON r1.station_id = NULLIF(b.destination_id, '')
+			LEFT JOIN routes r2 ON r2.station_id = NULLIF(q.destination_id, '')
 			WHERE DATE(b.created_at) = $1
 				AND b.booking_status = 'ACTIVE'
 				AND b.created_by IS NOT NULL
@@ -763,12 +763,12 @@ func (r *RepositoryImpl) GetAllStaffIncomeForMonth(ctx context.Context, year, mo
 			SELECT 
 				b.created_by as staff_id,
 				SUM(b.seats_booked) as total_seats_booked,
-				SUM(b.seats_booked * COALESCE(r1.service_fee, r2.service_fee, 0.2)) as total_seat_income,
+				SUM(b.seats_booked * (COALESCE(r1.base_price, r2.base_price, 0) + COALESCE(r1.service_fee, r2.service_fee, 0.2))) as total_seat_income,
 				COUNT(*) as total_transactions
 			FROM bookings b
 			LEFT JOIN vehicle_queue q ON q.id = NULLIF(b.queue_id, '')
-			LEFT JOIN routes r1 ON r1.station_id = b.destination_id
-			LEFT JOIN routes r2 ON r2.station_id = q.destination_id
+			LEFT JOIN routes r1 ON r1.station_id = NULLIF(b.destination_id, '')
+			LEFT JOIN routes r2 ON r2.station_id = NULLIF(q.destination_id, '')
 			WHERE EXTRACT(YEAR FROM b.created_at) = $1
 				AND EXTRACT(MONTH FROM b.created_at) = $2
 				AND b.booking_status = 'ACTIVE'

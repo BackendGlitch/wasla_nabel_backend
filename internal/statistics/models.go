@@ -125,7 +125,7 @@ type ActualIncomeSummary struct {
 	SeatsBooked             int       `json:"seatsBooked"`
 	ActualSeatIncome        float64   `json:"actualSeatIncome"` // sum over seats: base_price + routes.service_fee (per destination, default 0.2 TND)
 	DayPassSales            int       `json:"dayPassSales"`
-	DayPassIncome           float64   `json:"dayPassIncome"`           // 1.5 TND per day pass (see pricing.DayPassTotalPriceTND)
+	DayPassIncome           float64   `json:"dayPassIncome"`           // sum stored day_passes.price
 	TotalActualIncome       float64   `json:"totalActualIncome"`       // actualSeatIncome + dayPassIncome
 	SeatsWithoutDestination int       `json:"seatsWithoutDestination"` // bookings without queue/destination info
 }
