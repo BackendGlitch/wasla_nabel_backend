@@ -126,7 +126,7 @@ func (r *RepositoryImpl) getStaffDailyIncomeFallback(ctx context.Context, staffI
 			SELECT
 				b.created_by::text as staff_id,
 				SUM(b.seats_booked)::int as total_seats_booked,
-				SUM(b.seats_booked * (COALESCE(r1.base_price, r2.base_price, 0) + COALESCE(r1.service_fee, r2.service_fee, 0.2))) as total_seat_income,
+				SUM(b.seats_booked * COALESCE(r1.service_fee, r2.service_fee, 0.2)) as total_seat_income,
 				COUNT(*)::int as total_transactions
 			FROM bookings b
 			LEFT JOIN vehicle_queue q ON q.id = NULLIF(b.queue_id, '')
@@ -347,7 +347,8 @@ func (r *RepositoryImpl) GetStationIncomeRange(ctx context.Context, stationID st
 	return summaries, nil
 }
 
-// GetAllStaffIncomeForDate gets income summary for all staff members for a specific date
+// GetAllStaffIncomeForDate gets income summary for all staff members for a specific date.
+// Seat income is station fees only: sum over bookings of seats × routes.service_fee for that destination (default 0.2).
 func (r *RepositoryImpl) GetAllStaffIncomeForDate(ctx context.Context, date time.Time) ([]StaffIncomeSummary, error) {
 	query := `
 		SELECT 
@@ -375,7 +376,7 @@ func (r *RepositoryImpl) GetAllStaffIncomeForDate(ctx context.Context, date time
 			SELECT 
 				b.created_by as staff_id,
 				SUM(b.seats_booked) as total_seats_booked,
-				SUM(b.seats_booked * (COALESCE(r1.base_price, r2.base_price, 0) + COALESCE(r1.service_fee, r2.service_fee, 0.2))) as total_seat_income,
+				SUM(b.seats_booked * COALESCE(r1.service_fee, r2.service_fee, 0.2)) as total_seat_income,
 				COUNT(*) as total_transactions
 			FROM bookings b
 			LEFT JOIN vehicle_queue q ON q.id = NULLIF(b.queue_id, '')
@@ -763,7 +764,7 @@ func (r *RepositoryImpl) GetAllStaffIncomeForMonth(ctx context.Context, year, mo
 			SELECT 
 				b.created_by as staff_id,
 				SUM(b.seats_booked) as total_seats_booked,
-				SUM(b.seats_booked * (COALESCE(r1.base_price, r2.base_price, 0) + COALESCE(r1.service_fee, r2.service_fee, 0.2))) as total_seat_income,
+				SUM(b.seats_booked * COALESCE(r1.service_fee, r2.service_fee, 0.2)) as total_seat_income,
 				COUNT(*) as total_transactions
 			FROM bookings b
 			LEFT JOIN vehicle_queue q ON q.id = NULLIF(b.queue_id, '')
@@ -903,7 +904,7 @@ func (r *RepositoryImpl) staffDestBreakdownQuery(ctx context.Context, dateClause
 			COALESCE(r1.station_name, r2.station_name, 'Inconnu') AS dest_name,
 			COALESCE(SUM(b.seats_booked), 0)::int AS seats_booked,
 			COALESCE(SUM(CASE WHEN b.is_ghost_booking THEN b.seats_booked ELSE 0 END), 0)::int AS ghost_bookings,
-			COALESCE(SUM(b.seats_booked * (COALESCE(r1.base_price, r2.base_price, 0) + COALESCE(r1.service_fee, r2.service_fee, 0.2))), 0) AS seat_income
+			COALESCE(SUM(b.seats_booked * COALESCE(r1.service_fee, r2.service_fee, 0.2)), 0) AS seat_income
 		FROM bookings b
 		LEFT JOIN vehicle_queue q ON q.id = NULLIF(b.queue_id, '')
 		LEFT JOIN routes r1 ON r1.station_id = NULLIF(b.destination_id, '')

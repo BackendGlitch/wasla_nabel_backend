@@ -51,7 +51,8 @@ type StaffTransactionLog struct {
 	CreatedAt       time.Time `json:"createdAt"`
 }
 
-// StaffIncomeSummary represents income summary for a staff member
+// StaffIncomeSummary represents income summary for a staff member.
+// SeatIncome is total station fees on seats: sum over bookings of seats × routes.service_fee (not route base price).
 type StaffIncomeSummary struct {
 	StaffID                 string    `json:"staffId"`
 	StaffName               string    `json:"staffName"`
@@ -131,6 +132,7 @@ type ActualIncomeSummary struct {
 }
 
 // StaffDestinationIncomeSummary is a per-staff, per-destination booking breakdown.
+// SeatIncome is station fee only: sum(seats × routes.service_fee) for that destination (default 0.2 TND per seat if unset).
 type StaffDestinationIncomeSummary struct {
 	StaffID         string  `json:"staffId"`
 	StaffName       string  `json:"staffName"`
