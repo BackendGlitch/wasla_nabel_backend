@@ -37,8 +37,6 @@ const (
 	arStationLabel         = "المحطة"
 	arBookedSeatsFmt       = "المقاعد المحجوزة : %d"
 	arVehicleCapacityFmt   = "سعة المركبة : %d مقاعد"
-	arServiceFeesTotalFmt  = "مجموع رسوم الخدمة : %.3f"
-	arBaseTotalFmt         = "مجموع التعريفة : %.3f"
 	arFarewellMerci        = "شكرا لكم"
 	arExitAuthorized       = "الخروج مصرح به"
 	arDayPassNoService     = "بدون رسوم خدمة"
@@ -49,12 +47,12 @@ const (
 	arDayPassAmountFmt     = "مبلغ التصريح : %.3f"
 
 	// Default Arabic booking-slip banner (Fatma Zahra / Maghreb Arabi station, Nabeul).
-	defaultBookingCompanyArabicKV  = "الشركة الاهلية الجهوية فاطمة الزهراء لخدمات النقل بنابل"
-	defaultBookingStationArabicKV  = "محطة المغرب العربي بنابل"
-	defaultBookingRoutesHeaderArab = "السيارات المستغلة في المحطة"
+	defaultBookingCompanyArabicKV  = "إسم الشركة : الشركة الاهلية الجهوية فاطمة الزهراء لخدمات النقل بنابل"
+	defaultBookingStationArabicKV  = "إسم المحطة : محطة المغرب العربي بنابل"
+	defaultBookingRoutesHeaderArab = "الخطوط المستغلة في المحطة :"
 
-	arBookingCoLabel   = "الشركة"
-	arBookingStaLabel  = "المحطة"
+	arBookingCoLabel   = "إسم الشركة"
+	arBookingStaLabel  = "إسم المحطة"
 )
 
 func defaultStationRoutesArabicStatic() []string {
@@ -476,34 +474,18 @@ func formatTicketReadableDate(t time.Time) string {
 func arabicExitPassPricingBlocks(data *TicketData) []string {
 	var blocks []string
 	if data.BasePrice > 0 && data.SeatNumber > 0 {
+		lineTotal := data.BasePrice * float64(data.SeatNumber)
 		if data.VehicleCapacity > 0 && data.SeatNumber == data.VehicleCapacity {
-			serviceTotal := resolveServiceFeePerSeat(data) * float64(data.VehicleCapacity)
 			blocks = append(blocks,
 				fmt.Sprintf("{{AR_LINE:"+arVehicleCapacityFmt+"}}\n", data.VehicleCapacity),
-				fmt.Sprintf("{{AR_LINE:"+arServiceFeesTotalFmt+"}}\n", serviceTotal),
-				fmt.Sprintf("{{AR_LINE:"+arTotalFmt+"}}\n", serviceTotal),
+				fmt.Sprintf("{{AR_LINE:"+arTotalFmt+"}}\n", lineTotal),
 			)
 		} else {
-			baseTotal := data.BasePrice * float64(data.SeatNumber)
-			serviceTotal := resolveServiceFeePerSeat(data) * float64(data.SeatNumber)
-			lineTotal := baseTotal + serviceTotal
 			blocks = append(blocks,
 				fmt.Sprintf("{{AR_LINE:"+arBookedSeatsFmt+"}}\n", data.SeatNumber),
-				fmt.Sprintf("{{AR_LINE:"+arBaseTotalFmt+"}}\n", baseTotal),
-				fmt.Sprintf("{{AR_LINE:"+arServiceFeesTotalFmt+"}}\n", serviceTotal),
 				fmt.Sprintf("{{AR_LINE:"+arTotalFmt+"}}\n", lineTotal),
 			)
 		}
-	} else if data.BasePrice > 0 && data.VehicleCapacity > 0 {
-		baseTotal := data.BasePrice * float64(data.VehicleCapacity)
-		serviceTotal := resolveServiceFeePerSeat(data) * float64(data.VehicleCapacity)
-		lineTotal := baseTotal + serviceTotal
-		blocks = append(blocks,
-			fmt.Sprintf("{{AR_LINE:"+arVehicleCapacityFmt+"}}\n", data.VehicleCapacity),
-			fmt.Sprintf("{{AR_LINE:"+arBaseTotalFmt+"}}\n", baseTotal),
-			fmt.Sprintf("{{AR_LINE:"+arServiceFeesTotalFmt+"}}\n", serviceTotal),
-			fmt.Sprintf("{{AR_LINE:"+arTotalFmt+"}}\n", lineTotal),
-		)
 	} else {
 		blocks = append(blocks, fmt.Sprintf("{{AR_LINE:"+arTotalSimpleFmt+"}}\n", data.TotalAmount))
 	}

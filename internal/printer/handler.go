@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"station-backend/internal/pricing"
 	"station-backend/internal/queue"
 	"station-backend/pkg/middleware"
 
@@ -384,20 +383,14 @@ func (h *Handler) PrintExitPassAndRemoveFromQueue(c *gin.Context) {
 
 	var totalAmount float64
 	var seatNumber int
-	serviceFeePerSeat := request.ServiceFee
-	if serviceFeePerSeat <= 0 {
-		serviceFeePerSeat = pricing.ServiceFeePerSeatTND
-	}
 
-	// Check if vehicle has bookings or is empty
+	// Exit pass: tariff only (booked seats × destination base price). No station/service fees.
 	if request.BookedSeats > 0 {
-		// Per seat: base + 200 millimes (0.2 TND) service fee
-		totalAmount = float64(request.BookedSeats) * (request.BasePrice + serviceFeePerSeat)
+		totalAmount = float64(request.BookedSeats) * request.BasePrice
 		seatNumber = request.BookedSeats
 	} else {
-		// Empty vehicle: service fees only (200 millimes × capacity)
-		totalAmount = serviceFeePerSeat * float64(request.TotalSeats)
-		seatNumber = request.TotalSeats
+		totalAmount = 0
+		seatNumber = 0
 	}
 
 	// Create ticket data for printing
@@ -412,7 +405,7 @@ func (h *Handler) PrintExitPassAndRemoveFromQueue(c *gin.Context) {
 		RouteName:       request.RouteName,
 		VehicleCapacity: request.TotalSeats,
 		BasePrice:       request.BasePrice,
-		ServiceFee:      serviceFeePerSeat,
+		ServiceFee:      0,
 		ExitPassCount:   request.ExitPassCount,
 		CompanyName:     request.CompanyName,
 		CompanyLogo:     request.CompanyLogo,

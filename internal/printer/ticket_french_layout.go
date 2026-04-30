@@ -194,34 +194,18 @@ func RenderFrenchDayPassTicket(data *TicketData) string {
 func frenchExitPassLines(data *TicketData) []string {
 	var rows []string
 	if data.BasePrice > 0 && data.SeatNumber > 0 {
+		lineTotal := data.BasePrice * float64(data.SeatNumber)
 		if data.VehicleCapacity > 0 && data.SeatNumber == data.VehicleCapacity {
-			serviceTotal := resolveServiceFeePerSeat(data) * float64(data.VehicleCapacity)
 			rows = append(rows,
 				frenchTwoCol("CAPACITE", strconv.Itoa(data.VehicleCapacity)),
-				frenchTwoCol("TOTAL FRAIS SVC", fmt.Sprintf("%.3f", serviceTotal)),
-				frenchTwoCol("TOTAL", fmt.Sprintf("%.3f", serviceTotal)),
+				frenchTwoCol("TOTAL", fmt.Sprintf("%.3f", lineTotal)),
 			)
 		} else {
-			baseTotal := data.BasePrice * float64(data.SeatNumber)
-			serviceTotal := resolveServiceFeePerSeat(data) * float64(data.SeatNumber)
-			lineTotal := baseTotal + serviceTotal
 			rows = append(rows,
 				frenchTwoCol("PLACES RESERVEES", strconv.Itoa(data.SeatNumber)),
-				frenchTwoCol("TOTAL TARIF", fmt.Sprintf("%.3f", baseTotal)),
-				frenchTwoCol("TOTAL FRAIS SVC", fmt.Sprintf("%.3f", serviceTotal)),
 				frenchTwoCol("TOTAL", fmt.Sprintf("%.3f", lineTotal)),
 			)
 		}
-	} else if data.BasePrice > 0 && data.VehicleCapacity > 0 {
-		baseTotal := data.BasePrice * float64(data.VehicleCapacity)
-		serviceTotal := resolveServiceFeePerSeat(data) * float64(data.VehicleCapacity)
-		lineTotal := baseTotal + serviceTotal
-		rows = append(rows,
-			frenchTwoCol("CAPACITE", strconv.Itoa(data.VehicleCapacity)),
-			frenchTwoCol("TOTAL TARIF", fmt.Sprintf("%.3f", baseTotal)),
-			frenchTwoCol("TOTAL FRAIS SVC", fmt.Sprintf("%.3f", serviceTotal)),
-			frenchTwoCol("TOTAL", fmt.Sprintf("%.3f", lineTotal)),
-		)
 	} else {
 		rows = append(rows, frenchTwoCol("TOTAL", fmt.Sprintf("%.3f", data.TotalAmount)))
 	}
