@@ -779,10 +779,11 @@ func (r *RepositoryImpl) DeleteQueueEntry(ctx context.Context, id string) error 
 		       COALESCE(TRIM(q.destination_name), ''),
 		       q.total_seats,
 		       q.available_seats,
-		       COALESCE(r.base_price, q.base_price, 0)
+		       COALESCE(
+		         (SELECT r.base_price FROM routes r WHERE r.station_id = q.destination_id LIMIT 1),
+		         q.base_price, 0)
 		FROM vehicle_queue q
 		LEFT JOIN vehicles v ON v.id = q.vehicle_id
-		LEFT JOIN routes r ON r.station_id = q.destination_id
 		WHERE q.id = $1
 		FOR UPDATE`, id).Scan(&vehicleID, &lp, &destID, &destName,
 		&totalSeats, &availableSeats, &basePrice)

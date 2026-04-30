@@ -159,7 +159,7 @@ CREATE INDEX idx_bookings_created_at ON bookings (created_at DESC);
 
 CREATE TABLE trips (
   id TEXT PRIMARY KEY,
-  queue_id TEXT NOT NULL,
+  queue_id TEXT NULL,
   destination_id TEXT NOT NULL,
   destination_name TEXT NOT NULL,
   license_plate TEXT NOT NULL,
