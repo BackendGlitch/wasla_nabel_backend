@@ -336,7 +336,7 @@ func RenderArabicBookingTicket(data *TicketData) string {
 	}
 
 	sb.WriteString("{{TALON_COMPACT_OFF}}\n")
-	sb.WriteString("{{BOOKING_FINISH_FEED}}\n")
+	sb.WriteString("{{TALON_END_FEED}}\n")
 
 	return sb.String()
 }
@@ -593,5 +593,6 @@ func RenderArabicTalonOnly(data *TicketData) string {
 		sb.WriteString(ln)
 	}
 	sb.WriteString("{{TALON_COMPACT_OFF}}\n")
+	sb.WriteString("{{TALON_END_FEED}}\n")
 	return sb.String()
 }

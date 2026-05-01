@@ -906,27 +906,17 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 			resetStyle()
 			continue
 		}
-		if line == "{{BOOKING_TOP_TIGHT_LINES}}" {
-			// Slightly tighter line spacing on the passenger slip (Esc 3 n = dots between baselines).
-			buffer.Write([]byte{0x1B, 0x33, 18})
-			continue
-		}
-		if line == "{{BOOKING_RELAX_LINES}}" {
-			buffer.Write([]byte{0x1B, 0x32}) // default line spacing
-			resetStyle()
-			continue
-		}
-		if line == "{{BOOKING_FINISH_FEED}}" {
-			for range 6 {
+		if line == "{{PASSENGER_PRE_PARTIAL_FEED}}" {
+			// Blank line feeds only (no spacer text) — short tail before partial cut after footer.
+			for range 4 {
 				buffer.WriteByte(0x0A)
 			}
 			resetStyle()
 			continue
 		}
-
-		if line == "{{PASSENGER_PRE_PARTIAL_FEED}}" {
-			// Short tail before partial cut (was 4 LF — trims unused margin on passenger stub).
-			for range 2 {
+		if line == "{{TALON_END_FEED}}" {
+			// After compact talon (Agent / bottom rows): advance paper so the last line clears the cutter.
+			for range 6 {
 				buffer.WriteByte(0x0A)
 			}
 			resetStyle()
@@ -1039,7 +1029,8 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 
 		// Cut marker between printed blocks.
 		if line == "{{PARTIAL_CUT}}" {
-			// Minimal feed before blade — avoids a tall blank band on top of the talon.
+			// One extra safety feed right before cut for printers with delayed paper movement.
+			buffer.WriteByte(0x0A)
 			buffer.WriteByte(0x1D) // GS
 			buffer.WriteByte(0x56) // V
 			buffer.WriteByte(0x01) // partial cut
@@ -1135,7 +1126,6 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 			setTextScale(0x00)
 			buffer.WriteString(talonBottomRow(left, right, paperWidth))
 			buffer.WriteByte(0x0A)
-			recompactFrench()
 			continue
 		}
 

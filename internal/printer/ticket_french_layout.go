@@ -39,17 +39,14 @@ func frenchDestLabelForTalon(data *TicketData) string {
 	return "{{CENTER_SMALL:Dest: " + d + "}}\n"
 }
 
-// HEURE (+ optional * same row via two-col), oversized seat row, tighter gap to plate, Dest, Agent.
+// Stub: labeled HEURE in the upper band (uses space under the * line), then SIEGE max, spaced vehicle, Dest, Agent.
 func appendFrenchDriverTalonCompact(sb *strings.Builder, data *TicketData, when time.Time) {
 	plate := strings.ToUpper(strings.TrimSpace(data.LicensePlate))
-	hm := tunisFmtHM(when)
-	if data.FirstTripOfDay {
-		sb.WriteString("{{TALON_BOTTOM_ROW:HEURE " + hm + "|*}}\n")
-	} else {
-		sb.WriteString("{{CENTER_SMALL:HEURE " + hm + "}}\n")
-	}
-	sb.WriteString(fmt.Sprintf("{{FR_SEAT_FOCUS:%d}}\n", data.SeatNumber))
+	// Tie the top strip to clarify time before the oversized seat row.
+	sb.WriteString("{{CENTER_SMALL:HEURE " + tunisFmtHM(when) + "}}\n")
 	sb.WriteString("{{FR_LF_ONLY:1}}\n")
+	sb.WriteString(fmt.Sprintf("{{FR_SEAT_FOCUS:%d}}\n", data.SeatNumber))
+	sb.WriteString("{{FR_LF_ONLY:2}}\n")
 	sb.WriteString("{{FR_VEH_MEDIUM:" + plate + "}}\n")
 	sb.WriteString(frenchDestLabelForTalon(data))
 	sb.WriteString(frenchAgentLabelForTalon(data))
@@ -64,8 +61,6 @@ func RenderFrenchBookingTicket(data *TicketData) string {
 	}
 	fare := bookingDisplayFareTD(data)
 	plate := strings.ToUpper(strings.TrimSpace(data.LicensePlate))
-
-	sb.WriteString("{{BOOKING_TOP_TIGHT_LINES}}\n")
 
 	co := strings.TrimSpace(companyNameForTicket(data))
 	st := strings.TrimSpace(data.StationName)
@@ -89,16 +84,18 @@ func RenderFrenchBookingTicket(data *TicketData) string {
 	}
 	sb.WriteString("{{FR_BOLD_LINE:Tarif: " + fare + "}}\n")
 
-	sb.WriteString("{{BOOKING_RELAX_LINES}}\n")
 	sb.WriteString("{{FR_SEP}}\n")
 	sb.WriteString("{{CENTER_SMALL:Non remboursable}}\n")
 	sb.WriteString("{{PASSENGER_PRE_PARTIAL_FEED}}\n")
 	sb.WriteString("{{PARTIAL_CUT}}\n")
 
+	if data.FirstTripOfDay {
+		sb.WriteString("{{TALON_TOP_RIGHT_STAR}}\n")
+	}
 	sb.WriteString("{{TALON_COMPACT_ON}}\n")
 	appendFrenchDriverTalonCompact(&sb, data, when)
 	sb.WriteString("{{TALON_COMPACT_OFF}}\n")
-	sb.WriteString("{{BOOKING_FINISH_FEED}}\n")
+	sb.WriteString("{{TALON_END_FEED}}\n")
 	return sb.String()
 }
 
@@ -109,10 +106,13 @@ func RenderFrenchTalonOnly(data *TicketData) string {
 		when = time.Now()
 	}
 
+	if data.FirstTripOfDay {
+		sb.WriteString("{{TALON_TOP_RIGHT_STAR}}\n")
+	}
 	sb.WriteString("{{TALON_COMPACT_ON}}\n")
 	appendFrenchDriverTalonCompact(&sb, data, when)
 	sb.WriteString("{{TALON_COMPACT_OFF}}\n")
-	sb.WriteString("{{BOOKING_FINISH_FEED}}\n")
+	sb.WriteString("{{TALON_END_FEED}}\n")
 	return sb.String()
 }
 
