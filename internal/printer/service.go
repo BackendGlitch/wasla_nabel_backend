@@ -915,8 +915,8 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 			continue
 		}
 		if line == "{{TALON_END_FEED}}" {
-			// After compact talon (Agent / bottom rows): advance paper so the last line clears the cutter.
-			for range 6 {
+			// Short tail after compact talon — enough to clear cutter without excess blank paper.
+			for range 3 {
 				buffer.WriteByte(0x0A)
 			}
 			resetStyle()
@@ -1158,7 +1158,7 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 
 	resetStyle()
 
-	// Shorter tail feed before final cut — saves paper on compact booking + talon jobs.
+	// Final feed before full cut (combined with TALON_END_FEED on booking jobs).
 	for range 2 {
 		buffer.WriteByte(0x0A)
 	}

@@ -39,14 +39,17 @@ func frenchDestLabelForTalon(data *TicketData) string {
 	return "{{CENTER_SMALL:Dest: " + d + "}}\n"
 }
 
-// Stub: labeled HEURE in the upper band (uses space under the * line), then SIEGE max, spaced vehicle, Dest, Agent.
-func appendFrenchDriverTalonCompact(sb *strings.Builder, data *TicketData, when time.Time) {
+// Compact driver talon: tight vertical rhythm; first trip puts * on same row as HEURE (saves a band vs star-then-time).
+func appendFrenchDriverTalonCompact(sb *strings.Builder, data *TicketData, when time.Time, firstTripOfDay bool) {
 	plate := strings.ToUpper(strings.TrimSpace(data.LicensePlate))
-	// Tie the top strip to clarify time before the oversized seat row.
-	sb.WriteString("{{CENTER_SMALL:HEURE " + tunisFmtHM(when) + "}}\n")
-	sb.WriteString("{{FR_LF_ONLY:1}}\n")
+	hm := tunisFmtHM(when)
+	if firstTripOfDay {
+		sb.WriteString("{{TALON_BOTTOM_ROW:HEURE " + hm + "|*}}\n")
+	} else {
+		sb.WriteString("{{CENTER_SMALL:HEURE " + hm + "}}\n")
+	}
 	sb.WriteString(fmt.Sprintf("{{FR_SEAT_FOCUS:%d}}\n", data.SeatNumber))
-	sb.WriteString("{{FR_LF_ONLY:2}}\n")
+	sb.WriteString("{{FR_LF_ONLY:1}}\n")
 	sb.WriteString("{{FR_VEH_MEDIUM:" + plate + "}}\n")
 	sb.WriteString(frenchDestLabelForTalon(data))
 	sb.WriteString(frenchAgentLabelForTalon(data))
@@ -89,11 +92,8 @@ func RenderFrenchBookingTicket(data *TicketData) string {
 	sb.WriteString("{{PASSENGER_PRE_PARTIAL_FEED}}\n")
 	sb.WriteString("{{PARTIAL_CUT}}\n")
 
-	if data.FirstTripOfDay {
-		sb.WriteString("{{TALON_TOP_RIGHT_STAR}}\n")
-	}
 	sb.WriteString("{{TALON_COMPACT_ON}}\n")
-	appendFrenchDriverTalonCompact(&sb, data, when)
+	appendFrenchDriverTalonCompact(&sb, data, when, data.FirstTripOfDay)
 	sb.WriteString("{{TALON_COMPACT_OFF}}\n")
 	sb.WriteString("{{TALON_END_FEED}}\n")
 	return sb.String()
@@ -106,11 +106,8 @@ func RenderFrenchTalonOnly(data *TicketData) string {
 		when = time.Now()
 	}
 
-	if data.FirstTripOfDay {
-		sb.WriteString("{{TALON_TOP_RIGHT_STAR}}\n")
-	}
 	sb.WriteString("{{TALON_COMPACT_ON}}\n")
-	appendFrenchDriverTalonCompact(&sb, data, when)
+	appendFrenchDriverTalonCompact(&sb, data, when, data.FirstTripOfDay)
 	sb.WriteString("{{TALON_COMPACT_OFF}}\n")
 	sb.WriteString("{{TALON_END_FEED}}\n")
 	return sb.String()
