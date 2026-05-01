@@ -50,6 +50,10 @@ func (s *Service) CreateTripFromExit(ctx context.Context, queueEntryID string, l
 	return s.repo.CreateTripFromExit(ctx, queueEntryID, licensePlate, destinationName, seatsBooked, totalSeats, basePrice)
 }
 
+func (s *Service) CountTripsTodayForLicensePlate(ctx context.Context, licensePlate string) (int, error) {
+	return s.repo.CountTripsTodayForLicensePlate(ctx, licensePlate)
+}
+
 // Vehicles
 func (s *Service) ListVehicles(ctx context.Context, searchQuery string) ([]Vehicle, error) {
 	return s.repo.ListVehicles(ctx, searchQuery)

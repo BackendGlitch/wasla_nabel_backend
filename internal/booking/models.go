@@ -123,6 +123,8 @@ type Trip struct {
 	// Vehicle and pricing information
 	VehicleCapacity *int     `json:"vehicleCapacity"` // Vehicle capacity (nullable)
 	BasePrice       *float64 `json:"basePrice"`       // Base price per seat from route (nullable)
+	// True when this trip row is chronologically first for its plate today (exit pass tariff uses first-trip deduction).
+	FirstTripOfDay bool `json:"firstTripOfDay,omitempty"`
 }
 
 type QueueEntry struct {

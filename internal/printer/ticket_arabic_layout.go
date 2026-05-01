@@ -37,6 +37,8 @@ const (
 	arStationLabel         = "المحطة"
 	arBookedSeatsFmt       = "المقاعد المحجوزة : %d"
 	arVehicleCapacityFmt   = "سعة المركبة : %d مقاعد"
+	arExitPassTariffGrossFmt   = "مجموع التعريفة : %.3f"
+	arExitPassEntryDayDeductionFmt = "دخول المركبة — تصريح اليوم : -%.3f"
 	arFarewellMerci        = "شكرا لكم"
 	arExitAuthorized       = "الخروج مصرح به"
 	arDayPassNoService     = "بدون رسوم خدمة"
@@ -474,17 +476,29 @@ func formatTicketReadableDate(t time.Time) string {
 func arabicExitPassPricingBlocks(data *TicketData) []string {
 	var blocks []string
 	if data.BasePrice > 0 && data.SeatNumber > 0 {
-		lineTotal := data.BasePrice * float64(data.SeatNumber)
+		gross := data.BasePrice * float64(data.SeatNumber)
 		if data.VehicleCapacity > 0 && data.SeatNumber == data.VehicleCapacity {
 			blocks = append(blocks,
 				fmt.Sprintf("{{AR_LINE:"+arVehicleCapacityFmt+"}}\n", data.VehicleCapacity),
-				fmt.Sprintf("{{AR_LINE:"+arTotalFmt+"}}\n", lineTotal),
 			)
 		} else {
 			blocks = append(blocks,
 				fmt.Sprintf("{{AR_LINE:"+arBookedSeatsFmt+"}}\n", data.SeatNumber),
-				fmt.Sprintf("{{AR_LINE:"+arTotalFmt+"}}\n", lineTotal),
 			)
+		}
+		if data.FirstTripOfDay && gross > 0 {
+			ded := pricing.EntryDayPassFeeTND
+			net := gross - ded
+			if net < 0 {
+				net = 0
+			}
+			blocks = append(blocks,
+				fmt.Sprintf("{{AR_LINE:"+arExitPassTariffGrossFmt+"}}\n", gross),
+				fmt.Sprintf("{{AR_LINE:"+arExitPassEntryDayDeductionFmt+"}}\n", ded),
+				fmt.Sprintf("{{AR_LINE:"+arTotalFmt+"}}\n", net),
+			)
+		} else {
+			blocks = append(blocks, fmt.Sprintf("{{AR_LINE:"+arTotalFmt+"}}\n", gross))
 		}
 	} else {
 		blocks = append(blocks, fmt.Sprintf("{{AR_LINE:"+arTotalSimpleFmt+"}}\n", data.TotalAmount))
@@ -506,6 +520,9 @@ func RenderArabicExitPassTicket(data *TicketData) string {
 		sb.WriteString("{{W_EXIT_COUNT:" + strconv.Itoa(data.ExitPassCount) + "}}\n")
 	}
 	sb.WriteString("{{AR_SEP}}\n")
+	if data.FirstTripOfDay {
+		sb.WriteString("{{STAR_TR}}\n")
+	}
 	sb.WriteString("{{AR_LINE:" + arPlateLabel + "}}\n")
 	sb.WriteString(fmt.Sprintf("{{W_PLATE_LARGE:%s}}\n", strings.TrimSpace(data.LicensePlate)))
 	for _, d := range destinationArabicMarkers(data.DestinationName) {

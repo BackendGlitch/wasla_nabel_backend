@@ -12,6 +12,12 @@ import (
 	"station-backend/internal/pricing"
 )
 
+// normalizePlateKeyForTrips matches trips / booking license normalization (ignore spaces, case).
+func normalizePlateKeyForTrips(lp string) string {
+	s := strings.TrimSpace(strings.ToUpper(lp))
+	return strings.ReplaceAll(s, " ", "")
+}
+
 type Repository interface {
 	// Routes (includeInactive: list inactive rows too, for management CRUD)
 	ListRoutes(ctx context.Context, includeInactive bool) ([]Route, error)
@@ -56,6 +62,7 @@ type Repository interface {
 
 	// Trips
 	CreateTripFromExit(ctx context.Context, queueEntryID string, licensePlate string, destinationName string, seatsBooked int, totalSeats int, basePrice float64) (string, error)
+	CountTripsTodayForLicensePlate(ctx context.Context, licensePlate string) (int, error)
 }
 
 type RepositoryImpl struct {
@@ -879,6 +886,21 @@ func (r *RepositoryImpl) CreateTripFromExit(ctx context.Context, queueEntryID st
 		return "", err
 	}
 	return tripID, nil
+}
+
+func (r *RepositoryImpl) CountTripsTodayForLicensePlate(ctx context.Context, licensePlate string) (int, error) {
+	key := normalizePlateKeyForTrips(licensePlate)
+	if key == "" {
+		return 0, nil
+	}
+	var n int
+	err := r.db.QueryRow(ctx, `
+		SELECT COUNT(*)::int
+		FROM trips t
+		WHERE REPLACE(UPPER(TRIM(COALESCE(t.license_plate, ''))), ' ', '') = $1
+		  AND CAST(t.start_time AS date) = CURRENT_DATE
+	`, key).Scan(&n)
+	return n, err
 }
 
 func (r *RepositoryImpl) ReorderQueue(ctx context.Context, destinationID string, entryIDs []string) error {

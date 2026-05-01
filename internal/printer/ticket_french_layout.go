@@ -194,17 +194,29 @@ func RenderFrenchDayPassTicket(data *TicketData) string {
 func frenchExitPassLines(data *TicketData) []string {
 	var rows []string
 	if data.BasePrice > 0 && data.SeatNumber > 0 {
-		lineTotal := data.BasePrice * float64(data.SeatNumber)
+		gross := data.BasePrice * float64(data.SeatNumber)
 		if data.VehicleCapacity > 0 && data.SeatNumber == data.VehicleCapacity {
 			rows = append(rows,
 				frenchTwoCol("CAPACITE", strconv.Itoa(data.VehicleCapacity)),
-				frenchTwoCol("TOTAL", fmt.Sprintf("%.3f", lineTotal)),
 			)
 		} else {
 			rows = append(rows,
 				frenchTwoCol("PLACES RESERVEES", strconv.Itoa(data.SeatNumber)),
-				frenchTwoCol("TOTAL", fmt.Sprintf("%.3f", lineTotal)),
 			)
+		}
+		if data.FirstTripOfDay && gross > 0 {
+			ded := pricing.EntryDayPassFeeTND
+			net := gross - ded
+			if net < 0 {
+				net = 0
+			}
+			rows = append(rows,
+				frenchTwoCol("TOTAL TARIF", fmt.Sprintf("%.3f", gross)),
+				frenchTwoCol("PASSE ENTREE JOURNALIER", "-"+fmt.Sprintf("%.3f", ded)),
+				frenchTwoCol("TOTAL", fmt.Sprintf("%.3f", net)),
+			)
+		} else {
+			rows = append(rows, frenchTwoCol("TOTAL", fmt.Sprintf("%.3f", gross)))
 		}
 	} else {
 		rows = append(rows, frenchTwoCol("TOTAL", fmt.Sprintf("%.3f", data.TotalAmount)))
@@ -223,6 +235,9 @@ func RenderFrenchExitPassTicket(data *TicketData) string {
 		sb.WriteString("{{CENTER_SMALL:N° autorisation du jour: " + strconv.Itoa(data.ExitPassCount) + "}}\n")
 	}
 	sb.WriteString("{{FR_SEP}}\n")
+	if data.FirstTripOfDay {
+		sb.WriteString("{{TALON_TOP_RIGHT_STAR}}\n")
+	}
 	sb.WriteString("{{TALON_LP_BIG:" + strings.TrimSpace(data.LicensePlate) + "}}\n")
 	if d := strings.TrimSpace(data.DestinationName); d != "" {
 		sb.WriteString("{{CENTER_SMALL:DESTINATION: " + d + "}}\n")

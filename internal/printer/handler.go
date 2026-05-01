@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"station-backend/internal/pricing"
 	"station-backend/internal/queue"
 	"station-backend/pkg/middleware"
 
@@ -384,13 +385,30 @@ func (h *Handler) PrintExitPassAndRemoveFromQueue(c *gin.Context) {
 	var totalAmount float64
 	var seatNumber int
 
-	// Exit pass: tariff only (booked seats × destination base price). No station/service fees.
+	// Exit pass: tariff only (booked seats × destination base price). First trip today: − entry day fee.
+	grossTariff := 0.0
 	if request.BookedSeats > 0 {
-		totalAmount = float64(request.BookedSeats) * request.BasePrice
+		grossTariff = float64(request.BookedSeats) * request.BasePrice
 		seatNumber = request.BookedSeats
-	} else {
-		totalAmount = 0
-		seatNumber = 0
+	}
+	totalAmount = grossTariff
+
+	firstTrip := false
+	entryDayDeduction := 0.0
+	if request.BookedSeats > 0 && grossTariff > 0 {
+		nTripsToday, cerr := h.queueService.CountTripsTodayForLicensePlate(c.Request.Context(), request.LicensePlate)
+		if cerr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve first trip today: " + cerr.Error()})
+			return
+		}
+		firstTrip = nTripsToday == 0
+		if firstTrip {
+			entryDayDeduction = pricing.EntryDayPassFeeTND
+			totalAmount = grossTariff - entryDayDeduction
+			if totalAmount < 0 {
+				totalAmount = 0
+			}
+		}
 	}
 
 	// Create ticket data for printing
@@ -407,6 +425,7 @@ func (h *Handler) PrintExitPassAndRemoveFromQueue(c *gin.Context) {
 		BasePrice:       request.BasePrice,
 		ServiceFee:      0,
 		ExitPassCount:   request.ExitPassCount,
+		FirstTripOfDay:  firstTrip,
 		CompanyName:     request.CompanyName,
 		CompanyLogo:     request.CompanyLogo,
 		StaffFirstName:  request.StaffFirstName,
@@ -447,11 +466,14 @@ func (h *Handler) PrintExitPassAndRemoveFromQueue(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message":     "exit pass ticket printed and vehicle removed from queue successfully",
-		"totalAmount": totalAmount,
-		"bookedSeats": request.BookedSeats,
-		"basePrice":   request.BasePrice,
-		"isEmpty":     request.BookedSeats == 0,
+		"message":           "exit pass ticket printed and vehicle removed from queue successfully",
+		"totalAmount":       totalAmount,
+		"grossTariffAmount": grossTariff,
+		"entryDayDeduction": entryDayDeduction,
+		"firstTripOfDay":    firstTrip,
+		"bookedSeats":       request.BookedSeats,
+		"basePrice":         request.BasePrice,
+		"isEmpty":           request.BookedSeats == 0,
 	})
 }
 

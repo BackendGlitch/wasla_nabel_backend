@@ -919,7 +919,14 @@ func (r *RepositoryImpl) ListTrips(ctx context.Context, limit int) ([]Trip, erro
             NULLIF(to_jsonb(t)->>'vehicle_capacity', '')::int AS vehicle_capacity,
             NULLIF(to_jsonb(t)->>'base_price', '')::double precision AS base_price,
             t.start_time,
-            t.created_at
+            t.created_at,
+            (
+                ROW_NUMBER() OVER (
+                    PARTITION BY REPLACE(UPPER(TRIM(COALESCE(t.license_plate, ''))), ' ', ''),
+                               CAST(t.start_time AS date)
+                    ORDER BY t.start_time ASC NULLS LAST, t.created_at ASC NULLS LAST, t.id ASC
+                ) = 1
+            ) AS first_trip_of_day
         FROM trips t
         ORDER BY t.start_time DESC
         LIMIT $1`, limit)
@@ -930,7 +937,7 @@ func (r *RepositoryImpl) ListTrips(ctx context.Context, limit int) ([]Trip, erro
 	var list []Trip
 	for rows.Next() {
 		var t Trip
-		if err := rows.Scan(&t.ID, &t.VehicleID, &t.LicensePlate, &t.DestinationID, &t.DestinationName, &t.QueueID, &t.SeatsBooked, &t.VehicleCapacity, &t.BasePrice, &t.StartTime, &t.CreatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.VehicleID, &t.LicensePlate, &t.DestinationID, &t.DestinationName, &t.QueueID, &t.SeatsBooked, &t.VehicleCapacity, &t.BasePrice, &t.StartTime, &t.CreatedAt, &t.FirstTripOfDay); err != nil {
 			return nil, err
 		}
 		list = append(list, t)
@@ -965,7 +972,14 @@ func (r *RepositoryImpl) ListTodayTrips(ctx context.Context, search string, limi
                 NULLIF(to_jsonb(t)->>'vehicle_capacity', '')::int AS vehicle_capacity,
                 NULLIF(to_jsonb(t)->>'base_price', '')::double precision AS base_price,
                 t.start_time,
-                t.created_at
+                t.created_at,
+                (
+                    ROW_NUMBER() OVER (
+                        PARTITION BY REPLACE(UPPER(TRIM(COALESCE(t.license_plate, ''))), ' ', ''),
+                                   CAST(t.start_time AS date)
+                        ORDER BY t.start_time ASC NULLS LAST, t.created_at ASC NULLS LAST, t.id ASC
+                    ) = 1
+                ) AS first_trip_of_day
             FROM trips t
             WHERE t.start_time::date = CURRENT_DATE AND t.license_plate ILIKE '%' || $1 || '%'
             ORDER BY t.start_time DESC
@@ -988,7 +1002,14 @@ func (r *RepositoryImpl) ListTodayTrips(ctx context.Context, search string, limi
                 NULLIF(to_jsonb(t)->>'vehicle_capacity', '')::int AS vehicle_capacity,
                 NULLIF(to_jsonb(t)->>'base_price', '')::double precision AS base_price,
                 t.start_time,
-                t.created_at
+                t.created_at,
+                (
+                    ROW_NUMBER() OVER (
+                        PARTITION BY REPLACE(UPPER(TRIM(COALESCE(t.license_plate, ''))), ' ', ''),
+                                   CAST(t.start_time AS date)
+                        ORDER BY t.start_time ASC NULLS LAST, t.created_at ASC NULLS LAST, t.id ASC
+                    ) = 1
+                ) AS first_trip_of_day
             FROM trips t
             WHERE t.start_time::date = CURRENT_DATE
             ORDER BY t.start_time DESC
@@ -1002,7 +1023,7 @@ func (r *RepositoryImpl) ListTodayTrips(ctx context.Context, search string, limi
 	var list []Trip
 	for rows.Next() {
 		var t Trip
-		if err := rows.Scan(&t.ID, &t.VehicleID, &t.LicensePlate, &t.DestinationID, &t.DestinationName, &t.QueueID, &t.SeatsBooked, &t.VehicleCapacity, &t.BasePrice, &t.StartTime, &t.CreatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.VehicleID, &t.LicensePlate, &t.DestinationID, &t.DestinationName, &t.QueueID, &t.SeatsBooked, &t.VehicleCapacity, &t.BasePrice, &t.StartTime, &t.CreatedAt, &t.FirstTripOfDay); err != nil {
 			return nil, err
 		}
 		list = append(list, t)
