@@ -43,13 +43,13 @@ func frenchDestLabelForTalon(data *TicketData) string {
 func appendFrenchDriverTalonCompact(sb *strings.Builder, data *TicketData, when time.Time, firstTripOfDay bool) {
 	plate := strings.ToUpper(strings.TrimSpace(data.LicensePlate))
 	hm := tunisFmtHM(when)
+	// Always use TALON_BOTTOM_ROW (same as compact Font B row) — avoids CENTER_SMALL path and extra vertical slack.
 	if firstTripOfDay {
 		sb.WriteString("{{TALON_BOTTOM_ROW:HEURE " + hm + "|*}}\n")
 	} else {
-		sb.WriteString("{{CENTER_SMALL:HEURE " + hm + "}}\n")
+		sb.WriteString("{{TALON_BOTTOM_ROW:HEURE " + hm + "|}}\n")
 	}
 	sb.WriteString(fmt.Sprintf("{{FR_SEAT_FOCUS:%d}}\n", data.SeatNumber))
-	sb.WriteString("{{FR_LF_ONLY:1}}\n")
 	sb.WriteString("{{FR_VEH_MEDIUM:" + plate + "}}\n")
 	sb.WriteString(frenchDestLabelForTalon(data))
 	sb.WriteString(frenchAgentLabelForTalon(data))

@@ -21,6 +21,10 @@ import (
 
 const defaultCompanyName = "FATMA ZAHRA Services Transport"
 
+// compactTalonLineSpacingDots is ESC 3 n (line spacing in dots) for Font-B talon blocks.
+// Lower than default ~30; reduced from 18 to pull rows tighter and shrink dead space at talon top/bottom.
+const compactTalonLineSpacingDots byte = 12
+
 var (
 	defaultLogoOnce sync.Once
 	defaultLogoData []byte
@@ -847,7 +851,7 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 			resetStyle()
 			if isCompactTalon {
 				buffer.Write([]byte{0x1B, 0x4D, 0x01})
-				buffer.Write([]byte{0x1B, 0x33, 18})
+				buffer.Write([]byte{0x1B, 0x33, compactTalonLineSpacingDots})
 			}
 			continue
 		}
@@ -866,7 +870,7 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 			// ESC M 1 -> Font B (smaller)
 			buffer.Write([]byte{0x1B, 0x4D, 0x01})
 			// ESC 3 n -> set line spacing to n dots (smaller than default)
-			buffer.Write([]byte{0x1B, 0x33, 18})
+			buffer.Write([]byte{0x1B, 0x33, compactTalonLineSpacingDots})
 			continue
 		}
 		if line == "{{TALON_COMPACT_OFF}}" {
@@ -937,7 +941,7 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 			// Preserve compact Font B + tight spacing after naked feeds.
 			if isCompactTalon {
 				buffer.Write([]byte{0x1B, 0x4D, 0x01})
-				buffer.Write([]byte{0x1B, 0x33, 18})
+				buffer.Write([]byte{0x1B, 0x33, compactTalonLineSpacingDots})
 			}
 			continue
 		}
@@ -945,7 +949,7 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 		recompactFrench := func() {
 			if isCompactTalon {
 				buffer.Write([]byte{0x1B, 0x4D, 0x01})
-				buffer.Write([]byte{0x1B, 0x33, 18})
+				buffer.Write([]byte{0x1B, 0x33, compactTalonLineSpacingDots})
 			}
 		}
 		useFontABriefly := func() {
@@ -1108,7 +1112,7 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 			resetStyle()
 			if isCompactTalon {
 				buffer.Write([]byte{0x1B, 0x4D, 0x01})
-				buffer.Write([]byte{0x1B, 0x33, 18})
+				buffer.Write([]byte{0x1B, 0x33, compactTalonLineSpacingDots})
 			}
 			continue
 		}

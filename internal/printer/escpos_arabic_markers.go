@@ -54,7 +54,7 @@ func tryConsumeArabEscPosDirective(buf *bytes.Buffer, line string, paperWidth in
 			return
 		}
 		buf.Write([]byte{0x1B, 0x4D, 0x01}) // Font B
-		buf.Write([]byte{0x1B, 0x33, 18})   // tighter line spacing
+		buf.Write([]byte{0x1B, 0x33, compactTalonLineSpacingDots}) // match French compact talon density
 	}
 
 	switch {
