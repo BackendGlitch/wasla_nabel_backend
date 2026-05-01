@@ -336,6 +336,7 @@ func RenderArabicBookingTicket(data *TicketData) string {
 	}
 
 	sb.WriteString("{{TALON_COMPACT_OFF}}\n")
+	sb.WriteString("{{BOOKING_FINISH_FEED}}\n")
 
 	return sb.String()
 }
