@@ -71,6 +71,27 @@ func normalizeLicensePlateKey(lp string) string {
 	return strings.ReplaceAll(s, " ", "")
 }
 
+func tunisiaLocationBooking() *time.Location {
+	loc, err := time.LoadLocation("Africa/Tunis")
+	if err != nil {
+		return time.UTC
+	}
+	return loc
+}
+
+// naiveTSTunisFromPg rebuilds TIMESTAMP WITHOUT TIME ZONE wall clock in Africa/Tunis (session TZ matches database/postgres.go).
+// pgx unmarshals naive timestamps using UTC clocks; converting with Time.In(Africa/Tunis) shifts wall time (~+1h for Tunisia vs UTC-labelled scan).
+func naiveTSTunisFromPg(t time.Time) time.Time {
+	if t.IsZero() {
+		return t
+	}
+	return time.Date(
+		t.Year(), t.Month(), t.Day(),
+		t.Hour(), t.Minute(), t.Second(), t.Nanosecond(),
+		tunisiaLocationBooking(),
+	)
+}
+
 // firstTripOfDayReplayTx uses license plate, not queue/vehicle_queue: after a vehicle leaves, its queue row is often deleted
 // and JOIN vehicle_queue would drop historical trips — same LP at another station must still count as "already had a trip today".
 func firstTripOfDayReplayTx(ctx context.Context, tx pgx.Tx, licensePlate string, refTime time.Time) (bool, error) {
@@ -155,6 +176,7 @@ func (r *RepositoryImpl) getBookingByIdempotencyTx(ctx context.Context, tx pgx.T
 	if err != nil {
 		return nil, err
 	}
+	b.CreatedAt = naiveTSTunisFromPg(b.CreatedAt)
 	ft, err := firstTripOfDayReplayTx(ctx, tx, b.LicensePlate, b.CreatedAt)
 	if err != nil {
 		return nil, err
@@ -216,6 +238,7 @@ func (r *RepositoryImpl) getBookingsByIdempotencyTx(ctx context.Context, tx pgx.
 		); err != nil {
 			return nil, err
 		}
+		b.CreatedAt = naiveTSTunisFromPg(b.CreatedAt)
 		bookings = append(bookings, b)
 	}
 	if len(bookings) == 0 {
@@ -500,6 +523,7 @@ func (r *RepositoryImpl) CreateBookingByDestination(ctx context.Context, req Cre
 			}
 			return nil, err
 		}
+		b.CreatedAt = naiveTSTunisFromPg(b.CreatedAt)
 		break
 	}
 
@@ -596,6 +620,7 @@ func (r *RepositoryImpl) CancelBooking(ctx context.Context, bookingID string, st
 	); err != nil {
 		return nil, err
 	}
+	b.CreatedAt = naiveTSTunisFromPg(b.CreatedAt)
 	b.QueueID = vehicleID
 
 	if err := tx.Commit(ctx); err != nil {
@@ -733,6 +758,7 @@ func (r *RepositoryImpl) cancelLastBookingAfterQueueRemoved(ctx context.Context,
 		}
 		return nil, err
 	}
+	startTime = naiveTSTunisFromPg(startTime)
 
 	exitAt := startTime.UTC()
 	if time.Now().UTC().Sub(exitAt) > cancelLastExitRestoreWindow {
@@ -853,6 +879,7 @@ func (r *RepositoryImpl) cancelLastBookingAfterQueueRemoved(ctx context.Context,
 	); err != nil {
 		return nil, err
 	}
+	b.CreatedAt = naiveTSTunisFromPg(b.CreatedAt)
 	b.QueueID = queueID
 
 	if err := tx.Commit(ctx); err != nil {
@@ -940,6 +967,8 @@ func (r *RepositoryImpl) ListTrips(ctx context.Context, limit int) ([]Trip, erro
 		if err := rows.Scan(&t.ID, &t.VehicleID, &t.LicensePlate, &t.DestinationID, &t.DestinationName, &t.QueueID, &t.SeatsBooked, &t.VehicleCapacity, &t.BasePrice, &t.StartTime, &t.CreatedAt, &t.FirstTripOfDay); err != nil {
 			return nil, err
 		}
+		t.StartTime = naiveTSTunisFromPg(t.StartTime)
+		t.CreatedAt = naiveTSTunisFromPg(t.CreatedAt)
 		list = append(list, t)
 	}
 	return list, nil
@@ -1026,6 +1055,8 @@ func (r *RepositoryImpl) ListTodayTrips(ctx context.Context, search string, limi
 		if err := rows.Scan(&t.ID, &t.VehicleID, &t.LicensePlate, &t.DestinationID, &t.DestinationName, &t.QueueID, &t.SeatsBooked, &t.VehicleCapacity, &t.BasePrice, &t.StartTime, &t.CreatedAt, &t.FirstTripOfDay); err != nil {
 			return nil, err
 		}
+		t.StartTime = naiveTSTunisFromPg(t.StartTime)
+		t.CreatedAt = naiveTSTunisFromPg(t.CreatedAt)
 		list = append(list, t)
 	}
 	return list, nil
@@ -1202,7 +1233,7 @@ func (r *RepositoryImpl) CreateBookingByQueueEntry(ctx context.Context, req Crea
 			VerificationCode: verificationCode,
 			CreatedBy:        req.StaffID,
 			CreatedByName:    staffName, // Staff name instead of just ID
-			CreatedAt:        createdAt,
+			CreatedAt:        naiveTSTunisFromPg(createdAt),
 			FirstTripOfDay:   firstTripOfDay,
 		})
 	}
@@ -1485,7 +1516,7 @@ func (r *RepositoryImpl) CreateGhostBooking(ctx context.Context, req CreateGhost
 			VerificationCode: verificationCode,
 			CreatedBy:        req.StaffID,
 			CreatedByName:    staffName,
-			CreatedAt:        createdAt,
+			CreatedAt:        naiveTSTunisFromPg(createdAt),
 			IsGhostBooking:   true,
 			BasePrice:        basePrice,
 		})
@@ -1549,7 +1580,7 @@ func (r *RepositoryImpl) getGhostBookingsByIdempotencyBatchTx(ctx context.Contex
 		); err != nil {
 			return nil, err
 		}
-		gb.CreatedAt = createdAt
+		gb.CreatedAt = naiveTSTunisFromPg(createdAt)
 		results = append(results, &gb)
 	}
 	if len(results) == 0 {
