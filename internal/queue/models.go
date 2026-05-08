@@ -177,6 +177,8 @@ type QueueEntry struct {
 	DayPassStatus      string     `json:"dayPassStatus"` // "no_pass", "has_pass", "recent_pass"
 	DayPassPurchasedAt *time.Time `json:"dayPassPurchasedAt,omitempty"`
 	HasTripsToday      bool       `json:"hasTripsToday"`
+	// IsGarageBlocked: vehicle parked in garage; keeps queue_position but is skipped for next-car booking and POS list when filtered.
+	IsGarageBlocked bool `json:"isGarageBlocked"`
 }
 
 type AddQueueEntryRequest struct {
@@ -194,6 +196,10 @@ type AddQueueEntryResponse struct {
 	DayPass       *DayPassCreatedEvent `json:"dayPass,omitempty"`
 	DayPassStatus string               `json:"dayPassStatus"`          // "valid", "created", "none"
 	DayPassValid  *DayPassCreatedEvent `json:"dayPassValid,omitempty"` // Existing valid day pass
+}
+
+type SetGarageBlockedRequest struct {
+	Blocked bool `json:"blocked"`
 }
 
 type UpdateQueueEntryRequest struct {

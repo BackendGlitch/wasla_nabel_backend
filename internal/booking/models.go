@@ -128,22 +128,23 @@ type Trip struct {
 }
 
 type QueueEntry struct {
-	ID                 string
-	VehicleID          string
-	LicensePlate       string
-	DestinationID      string
-	DestinationName    string
-	SubRoute           *string
-	SubRouteName       *string
-	QueueType          string
-	QueuePosition      int
-	Status             string
-	EnteredAt          time.Time
-	AvailableSeats     int
-	TotalSeats         int
-	BasePrice          float64
-	EstimatedDeparture *time.Time
-	ActualDeparture    *time.Time
+	ID                 string     `json:"id"`
+	VehicleID          string     `json:"vehicleId"`
+	LicensePlate       string     `json:"licensePlate"`
+	DestinationID      string     `json:"destinationId"`
+	DestinationName    string     `json:"destinationName"`
+	SubRoute           *string    `json:"subRoute,omitempty"`
+	SubRouteName       *string    `json:"subRouteName,omitempty"`
+	QueueType          string     `json:"queueType"`
+	QueuePosition      int        `json:"queuePosition"`
+	Status             string     `json:"status"`
+	EnteredAt          time.Time  `json:"enteredAt"`
+	AvailableSeats     int        `json:"availableSeats"`
+	TotalSeats         int        `json:"totalSeats"`
+	BasePrice          float64    `json:"basePrice"`
+	EstimatedDeparture *time.Time `json:"estimatedDeparture,omitempty"`
+	ActualDeparture    *time.Time `json:"actualDeparture,omitempty"`
+	IsGarageBlocked    bool       `json:"isGarageBlocked,omitempty"`
 }
 
 // TodayBookedTicketsByDestination returns the number of tickets booked today,

@@ -1,18 +1,44 @@
-================================
-  FATMA ZAHRA Services Transport
-================================
-     BILLET DE RÉSERVATION
---------------------------------
-Vehicule: 123 TU 4567
-Destination: SFAX
-Siège: 3
-Prix de base: 13.50 TND
-Frais de service: 0.45 TND
-Total: 13.95 TND
-Date: 20/02/2026 14:30
-Agent: Ali Ben Salah
---------------------------------
-Merci de nous avoir choisis!
-Agent: Ali Ben Salah
+Wasla — booking ticket preview (sample data)
+Open this file in a text editor with a monospace font for best results.
+================================================
 
+Sample fields: destination, plate, seat, amount, agent, createdAt.
+  Destination: Sousse — Bab Bhar
+  Plate:       87 TUN 4521
+  Seat:        3
+  Amount:      8.500 TND
+  Agent:       Samia Trabelsi
 
+------------------------------------------------
+~32-column thermal-style preview
+------------------------------------------------
+  Wasla Demo Co
+  Station Centre
+       Sousse — Bab Bhar        
+--------------------------------
+          87 TUN 4521           
+SIEGE 3
+--------------------------------
+Tarif: 8.500 TND
+Agent: Samia Trabelsi
+2026/05/08  14:30
+--------------------------------
+  Non remboursable
+          (paper feed)          
+
+================================================
+Raw template (markers — what printer-service turns into ESC/POS)
+================================================
+{{CENTER_SMALL:Wasla Demo Co}}
+{{CENTER_SMALL:Station Centre}}
+{{FR_CENTER_TITLE:Sousse — Bab Bhar}}
+{{FR_SEP}}
+{{TALON_LP_BIG:87 TUN 4521}}
+{{FR_BOLD_LINE:SIEGE 3}}
+{{FR_SEP}}
+{{FR_BOLD_LINE:Tarif: 8.500 TND}}
+{{FR_BOLD_LINE:Agent: Samia Trabelsi}}
+{{FR_BOLD_LINE:2026/05/08  14:30}}
+{{FR_SEP}}
+{{CENTER_SMALL:Non remboursable}}
+{{FEED_BEFORE_CUT}}

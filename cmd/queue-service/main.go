@@ -88,6 +88,7 @@ func main() {
 		api.POST("/queue/:destinationId", h.AddQueueEntry)
 		api.PUT("/queue/:destinationId/reorder", h.ReorderQueue)
 		api.PUT("/queue/:destinationId/entry/:id", h.UpdateQueueEntry)
+		api.PUT("/queue/:destinationId/entry/:id/garage-block", h.SetGarageBlocked)
 		api.DELETE("/queue/:destinationId/entry/:id", h.DeleteQueueEntry)
 		api.PUT("/queue/:destinationId/entry/:id/move", h.MoveEntry)
 		api.POST("/queue/:destinationId/transfer-seats", h.TransferSeats)

@@ -138,6 +138,7 @@ func (r *RepositoryImpl) ListRouteAvailability(ctx context.Context) ([]RouteAvai
 			GROUP BY destination_id
 		) wib ON wib.destination_id = q.destination_id
 		WHERE q.queue_type = 'REGULAR'
+		  AND NOT COALESCE(q.is_garage_blocked, false)
 		  AND q.status IN ('WAITING', 'LOADING', 'READY')
 		  AND q.available_seats > 0
 		GROUP BY q.destination_id, q.destination_name, wib.seats_booked
@@ -177,6 +178,7 @@ func (r *RepositoryImpl) GetRouteDetails(ctx context.Context, destinationID stri
 		) wib ON wib.queue_id = q.id
 		WHERE q.destination_id = $1
 		  AND q.queue_type = 'REGULAR'
+		  AND NOT COALESCE(q.is_garage_blocked, false)
 		  AND q.status IN ('WAITING', 'LOADING', 'READY')
 		  AND (q.available_seats - COALESCE(wib.seats_booked, 0)) > 0
 		ORDER BY q.queue_position ASC`, destinationID)
@@ -246,6 +248,7 @@ func (r *RepositoryImpl) CreateBookingHold(ctx context.Context, req CreateBookin
 		) wib ON wib.queue_id = q.id
 		WHERE q.destination_id = $1
 		  AND q.queue_type = 'REGULAR'
+		  AND NOT COALESCE(q.is_garage_blocked, false)
 		  AND q.status IN ('WAITING', 'LOADING', 'READY')
 		  AND (q.available_seats - COALESCE(wib.seats_booked, 0)) >= $2
 		ORDER BY q.queue_position ASC

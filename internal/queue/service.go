@@ -96,8 +96,26 @@ func (s *Service) DeleteAuthorizedRoute(ctx context.Context, authID string) erro
 }
 
 // Queue entries
-func (s *Service) ListQueue(ctx context.Context, destinationID string, subRoute *string) ([]QueueEntry, error) {
-	return s.repo.ListQueue(ctx, destinationID, subRoute)
+func (s *Service) ListQueue(ctx context.Context, destinationID string, subRoute *string, excludeGarageBlocked bool) ([]QueueEntry, error) {
+	return s.repo.ListQueue(ctx, destinationID, subRoute, excludeGarageBlocked)
+}
+
+func (s *Service) SetGarageBlocked(ctx context.Context, destinationID, queueEntryID string, blocked bool) ([]QueueEntry, error) {
+	if err := s.repo.SetGarageBlocked(ctx, destinationID, queueEntryID, blocked); err != nil {
+		return nil, err
+	}
+	list, err := s.repo.ListQueue(ctx, destinationID, nil, false)
+	if err != nil {
+		return nil, err
+	}
+	if s.ws != nil {
+		s.ws.BroadcastToStation(destinationID, events.QueueEntryUpdated, map[string]interface{}{
+			"queue":         list,
+			"garageBlocked": blocked,
+			"queueEntryId":  queueEntryID,
+		})
+	}
+	return list, nil
 }
 
 func (s *Service) AddQueueEntry(ctx context.Context, req AddQueueEntryRequest) (*AddQueueEntryResponse, error) {
@@ -127,7 +145,7 @@ func (s *Service) AddQueueEntry(ctx context.Context, req AddQueueEntryRequest) (
 		}
 
 		// include refreshed queue snapshot
-		if list, lerr := s.repo.ListQueue(ctx, req.DestinationID, nil); lerr == nil {
+		if list, lerr := s.repo.ListQueue(ctx, req.DestinationID, nil, false); lerr == nil {
 			s.ws.BroadcastToStation(req.DestinationID, events.QueueEntryAdded, map[string]interface{}{
 				"entry": e,
 				"queue": list,
@@ -147,7 +165,7 @@ func (s *Service) GetVehicleDayPass(ctx context.Context, vehicleID string) (*Day
 func (s *Service) UpdateQueueEntry(ctx context.Context, id string, req UpdateQueueEntryRequest) (*QueueEntry, error) {
 	e, err := s.repo.UpdateQueueEntry(ctx, id, req)
 	if err == nil && s.ws != nil {
-		if list, lerr := s.repo.ListQueue(ctx, e.DestinationID, nil); lerr == nil {
+		if list, lerr := s.repo.ListQueue(ctx, e.DestinationID, nil, false); lerr == nil {
 			s.ws.BroadcastToStation(e.DestinationID, events.QueueEntryUpdated, map[string]interface{}{
 				"entry": e,
 				"queue": list,
@@ -197,7 +215,7 @@ func (s *Service) ReorderQueue(ctx context.Context, destinationID string, entryI
 	}
 	// Broadcast minimal info to listeners (clients can refetch queue)
 	if s.ws != nil {
-		if list, lerr := s.repo.ListQueue(ctx, destinationID, nil); lerr == nil {
+		if list, lerr := s.repo.ListQueue(ctx, destinationID, nil, false); lerr == nil {
 			s.ws.BroadcastToStation(destinationID, events.QueueReordered, map[string]interface{}{
 				"entryIds": entryIDs,
 				"queue":    list,
@@ -234,10 +252,10 @@ func (s *Service) ChangeDestination(ctx context.Context, entryID, oldDestination
 		return err
 	}
 	if s.ws != nil {
-		if listOld, lerr := s.repo.ListQueue(ctx, oldDestinationID, nil); lerr == nil {
+		if listOld, lerr := s.repo.ListQueue(ctx, oldDestinationID, nil, false); lerr == nil {
 			s.ws.BroadcastToStation(oldDestinationID, events.QueueReordered, map[string]interface{}{"queue": listOld})
 		}
-		if listNew, lerr := s.repo.ListQueue(ctx, newDestinationID, nil); lerr == nil {
+		if listNew, lerr := s.repo.ListQueue(ctx, newDestinationID, nil, false); lerr == nil {
 			s.ws.BroadcastToStation(newDestinationID, events.QueueEntryAdded, map[string]interface{}{"queue": listNew})
 		}
 	}

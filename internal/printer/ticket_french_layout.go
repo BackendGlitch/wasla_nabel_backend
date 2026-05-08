@@ -55,7 +55,8 @@ func appendFrenchDriverTalonCompact(sb *strings.Builder, data *TicketData, when 
 	sb.WriteString(frenchAgentLabelForTalon(data))
 }
 
-// RenderFrenchBookingTicket: dense passenger slip + shorter driver talon; French only, ESC/POS-friendly.
+// RenderFrenchBookingTicket: single thermal slip — no separate driver talon / second tear-off.
+// Visibility order: destination (title), license plate, seat, price, agent, date & time.
 func RenderFrenchBookingTicket(data *TicketData) string {
 	var sb strings.Builder
 	when := data.CreatedAt
@@ -64,6 +65,10 @@ func RenderFrenchBookingTicket(data *TicketData) string {
 	}
 	fare := bookingDisplayFareTD(data)
 	plate := strings.ToUpper(strings.TrimSpace(data.LicensePlate))
+	dest := strings.TrimSpace(data.DestinationName)
+	if dest == "" {
+		dest = "-"
+	}
 
 	co := strings.TrimSpace(companyNameForTicket(data))
 	st := strings.TrimSpace(data.StationName)
@@ -73,29 +78,37 @@ func RenderFrenchBookingTicket(data *TicketData) string {
 	if st != "" && !strings.EqualFold(st, co) {
 		sb.WriteString("{{CENTER_SMALL:" + st + "}}\n")
 	}
-	sb.WriteString("{{CENTER_SMALL:BILLET PASSAGER}}\n")
 
-	sb.WriteString(fmt.Sprintf("{{FR_SEAT_FOCUS:%d}}\n", data.SeatNumber))
-	sb.WriteString("{{FR_VEH_MEDIUM:Veh: " + plate + "}}\n")
+	// 1) Destination — primary (same style as other FR_CENTER_TITLE headers)
+	sb.WriteString("{{FR_CENTER_TITLE:" + dest + "}}\n")
+	sb.WriteString("{{FR_SEP}}\n")
 
-	sb.WriteString("{{CENTER_SMALL:Date: " + tunisFmtDateSlash(when) + "  " + tunisFmtHM(when) + "}}\n")
+	// 2) License plate — large
+	sb.WriteString("{{TALON_LP_BIG:" + plate + "}}\n")
 
-	if d := strings.TrimSpace(data.DestinationName); d == "" {
-		sb.WriteString("{{CENTER_SMALL:Dest: -}}\n")
-	} else {
-		sb.WriteString("{{CENTER_SMALL:Dest: " + d + "}}\n")
+	// 3) Seat (per seat bookings)
+	if data.SeatNumber > 0 {
+		sb.WriteString(fmt.Sprintf("{{FR_BOLD_LINE:SIEGE %d}}\n", data.SeatNumber))
 	}
-	sb.WriteString("{{FR_BOLD_LINE:Tarif: " + fare + "}}\n")
+
+	sb.WriteString("{{FR_SEP}}\n")
+
+	// 4) Price
+	sb.WriteString("{{FR_BOLD_LINE:Tarif: " + fare + " TND}}\n")
+
+	// 5) Agent
+	if a := strings.TrimSpace(agentLineForTicket(data)); a != "" && !strings.EqualFold(a, "Agent") {
+		sb.WriteString("{{FR_BOLD_LINE:Agent: " + a + "}}\n")
+	} else {
+		sb.WriteString("{{CENTER_SMALL:Agent: -}}\n")
+	}
+
+	// 6) Date & time
+	sb.WriteString("{{FR_BOLD_LINE:" + tunisFmtDateSlash(when) + "  " + tunisFmtHM(when) + "}}\n")
 
 	sb.WriteString("{{FR_SEP}}\n")
 	sb.WriteString("{{CENTER_SMALL:Non remboursable}}\n")
-	sb.WriteString("{{PASSENGER_PRE_PARTIAL_FEED}}\n")
-	sb.WriteString("{{PARTIAL_CUT}}\n")
-
-	sb.WriteString("{{TALON_COMPACT_ON}}\n")
-	appendFrenchDriverTalonCompact(&sb, data, when, data.FirstTripOfDay)
-	sb.WriteString("{{TALON_COMPACT_OFF}}\n")
-	sb.WriteString("{{TALON_END_FEED}}\n")
+	sb.WriteString("{{FEED_BEFORE_CUT}}\n")
 	return sb.String()
 }
 

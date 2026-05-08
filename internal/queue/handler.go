@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"station-backend/pkg/utils"
 
@@ -201,7 +202,9 @@ func (h *Handler) ListQueue(c *gin.Context) {
 	if sr := c.Query("subRoute"); sr != "" {
 		sub = &sr
 	}
-	list, err := h.service.ListQueue(context.Background(), destinationID, sub)
+	qeb := strings.ToLower(strings.TrimSpace(c.Query("excludeGarageBlocked")))
+	excludeBlocked := qeb == "1" || qeb == "true" || qeb == "yes"
+	list, err := h.service.ListQueue(context.Background(), destinationID, sub, excludeBlocked)
 	if err != nil {
 		utils.InternalServerErrorResponse(c, "Failed to list queue", err)
 		return
@@ -294,6 +297,27 @@ func (h *Handler) UpdateQueueEntry(c *gin.Context) {
 		return
 	}
 	utils.SuccessResponse(c, http.StatusOK, "Queue entry updated", res)
+}
+
+func (h *Handler) SetGarageBlocked(c *gin.Context) {
+	destinationID := c.Param("destinationId")
+	entryID := c.Param("id")
+	var req SetGarageBlockedRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.BadRequestResponse(c, "Invalid request body (expected {\"blocked\": true|false})")
+		return
+	}
+	list, err := h.service.SetGarageBlocked(context.Background(), destinationID, entryID, req.Blocked)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "not found") ||
+			strings.Contains(strings.ToLower(err.Error()), "does not belong") {
+			utils.BadRequestResponse(c, err.Error())
+			return
+		}
+		utils.InternalServerErrorResponse(c, "Failed to update garage flag", err)
+		return
+	}
+	utils.SuccessResponse(c, http.StatusOK, "Queue garage flag updated", list)
 }
 
 func (h *Handler) DeleteQueueEntry(c *gin.Context) {

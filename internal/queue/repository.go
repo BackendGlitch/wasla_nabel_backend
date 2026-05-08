@@ -38,7 +38,8 @@ type Repository interface {
 	DeleteAuthorizedRoute(ctx context.Context, authID string) error
 
 	// Queue entries
-	ListQueue(ctx context.Context, destinationID string, subRoute *string) ([]QueueEntry, error)
+	ListQueue(ctx context.Context, destinationID string, subRoute *string, excludeGarageBlocked bool) ([]QueueEntry, error)
+	SetGarageBlocked(ctx context.Context, destinationID, queueEntryID string, blocked bool) error
 	AddQueueEntry(ctx context.Context, req AddQueueEntryRequest) (*QueueEntry, *DayPassCreatedEvent, *DayPassCreatedEvent, string, error)
 	GetVehicleDayPass(ctx context.Context, vehicleID string) (*DayPassCreatedEvent, error)
 	UpdateQueueEntry(ctx context.Context, id string, req UpdateQueueEntryRequest) (*QueueEntry, error)
@@ -99,6 +100,31 @@ func asTunisWall(t time.Time) time.Time {
 
 func NewRepository(db *pgxpool.Pool) Repository {
 	return &RepositoryImpl{db: db}
+}
+
+// queueDestinationTxAdvLockK1 must match booking.RepositoryImpl.bookingDestinationTxAdvLockK1
+// (internal/booking/repository.go). The same per-destination transaction advisory serializes
+// queue mutations with seat bookings and prevents deadlocks on vehicle_queue (e.g. concurrent
+// deletes each holding one row lock then compacting all rows for the destination).
+const queueDestinationTxAdvLockK1 = 918237401
+
+func (r *RepositoryImpl) queueDestAdvisoryLock(ctx context.Context, tx pgx.Tx, destinationID string) error {
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1, hashtext($2::text)::int)`, queueDestinationTxAdvLockK1, destinationID)
+	return err
+}
+
+func (r *RepositoryImpl) queueDestAdvisoryLockTwo(ctx context.Context, tx pgx.Tx, a, b string) error {
+	if strings.TrimSpace(a) == strings.TrimSpace(b) {
+		return r.queueDestAdvisoryLock(ctx, tx, a)
+	}
+	first, second := a, b
+	if second < first {
+		first, second = second, first
+	}
+	if err := r.queueDestAdvisoryLock(ctx, tx, first); err != nil {
+		return err
+	}
+	return r.queueDestAdvisoryLock(ctx, tx, second)
 }
 
 // ===== Routes =====
@@ -415,7 +441,11 @@ func (r *RepositoryImpl) DeleteAuthorizedRoute(ctx context.Context, authID strin
 
 // ===== Queue entries =====
 
-func (r *RepositoryImpl) ListQueue(ctx context.Context, destinationID string, subRoute *string) ([]QueueEntry, error) {
+func (r *RepositoryImpl) ListQueue(ctx context.Context, destinationID string, subRoute *string, excludeGarageBlocked bool) ([]QueueEntry, error) {
+	garageFilter := ""
+	if excludeGarageBlocked {
+		garageFilter = "\n              AND NOT COALESCE(q.is_garage_blocked, false)"
+	}
 	var rows pgx.Rows
 	var err error
 	if subRoute != nil && *subRoute != "" {
@@ -441,7 +471,8 @@ func (r *RepositoryImpl) ListQueue(ctx context.Context, destinationID string, su
                      ELSE 'no_pass'
                    END as day_pass_status,
                    dp.purchase_date as day_pass_purchased_at,
-                   COALESCE(dp.has_trips_today, false) as has_trips_today
+                   COALESCE(dp.has_trips_today, false) as has_trips_today,
+                   COALESCE(q.is_garage_blocked, false) as is_garage_blocked
             FROM vehicle_queue q
             LEFT JOIN vehicles v ON v.id = q.vehicle_id
             LEFT JOIN (
@@ -465,7 +496,7 @@ func (r *RepositoryImpl) ListQueue(ctx context.Context, destinationID string, su
                 UNION
                 SELECT r.station_id FROM routes r WHERE r.id = $1
             )
-              AND q.sub_route = $2
+              AND q.sub_route = $2`+garageFilter+`
             ORDER BY q.queue_position ASC`, destinationID, *subRoute)
 	} else {
 		rows, err = r.db.Query(ctx, `
@@ -490,7 +521,8 @@ func (r *RepositoryImpl) ListQueue(ctx context.Context, destinationID string, su
                      ELSE 'no_pass'
                    END as day_pass_status,
                    dp.purchase_date as day_pass_purchased_at,
-                   COALESCE(dp.has_trips_today, false) as has_trips_today
+                   COALESCE(dp.has_trips_today, false) as has_trips_today,
+                   COALESCE(q.is_garage_blocked, false) as is_garage_blocked
             FROM vehicle_queue q
             LEFT JOIN vehicles v ON v.id = q.vehicle_id
             LEFT JOIN (
@@ -513,7 +545,7 @@ func (r *RepositoryImpl) ListQueue(ctx context.Context, destinationID string, su
                 SELECT r.id FROM routes r WHERE r.station_id = $1
                 UNION
                 SELECT r.station_id FROM routes r WHERE r.id = $1
-            )
+            )`+garageFilter+`
             ORDER BY q.queue_position ASC`, destinationID)
 	}
 	if err != nil {
@@ -527,12 +559,71 @@ func (r *RepositoryImpl) ListQueue(ctx context.Context, destinationID string, su
 		if err := rows.Scan(&e.ID, &e.VehicleID, &e.LicensePlate, &e.DestinationID, &e.DestinationName,
 			&e.SubRoute, &e.SubRouteName, &e.QueueType, &e.QueuePosition, &e.Status,
 			&e.EnteredAt, &e.AvailableSeats, &e.TotalSeats, &e.BasePrice, &e.EstimatedDeparture, &e.ActualDeparture,
-			&e.BookedSeats, &e.HasDayPass, &e.DayPassStatus, &e.DayPassPurchasedAt, &e.HasTripsToday); err != nil {
+			&e.BookedSeats, &e.HasDayPass, &e.DayPassStatus, &e.DayPassPurchasedAt, &e.HasTripsToday, &e.IsGarageBlocked); err != nil {
 			return nil, err
 		}
 		list = append(list, e)
 	}
 	return list, nil
+}
+
+func (r *RepositoryImpl) compactQueuePositionsTx(ctx context.Context, tx pgx.Tx, destinationID string) error {
+	_, err := tx.Exec(ctx, `
+		WITH o AS (
+			SELECT id, ROW_NUMBER() OVER (ORDER BY queue_position ASC) AS np
+			FROM vehicle_queue WHERE destination_id = $1
+		)
+		UPDATE vehicle_queue v SET queue_position = o.np
+		FROM o WHERE v.id = o.id`,
+		destinationID)
+	return err
+}
+
+// SetGarageBlocked toggles garage hold (frozen slot). Unblocking a sole row normalizes queue_position to 1.
+func (r *RepositoryImpl) SetGarageBlocked(ctx context.Context, destinationID, queueEntryID string, blocked bool) error {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if err := r.queueDestAdvisoryLock(ctx, tx, destinationID); err != nil {
+		return err
+	}
+
+	var dest string
+	if err := tx.QueryRow(ctx, `
+		SELECT q.destination_id FROM vehicle_queue q WHERE q.id = $1 FOR UPDATE OF q`, queueEntryID).Scan(&dest); err != nil {
+		if err == pgx.ErrNoRows {
+			return fmt.Errorf("queue entry not found")
+		}
+		return err
+	}
+	if strings.TrimSpace(dest) != strings.TrimSpace(destinationID) {
+		return fmt.Errorf("queue entry does not belong to this destination")
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE vehicle_queue SET
+		  is_garage_blocked = $2,
+		  prioritize_after_blocked_unblock = CASE WHEN $2 THEN false ELSE true END
+		WHERE id = $1`, queueEntryID, blocked); err != nil {
+		return err
+	}
+
+	if !blocked {
+		var n int
+		if err := tx.QueryRow(ctx, `SELECT COUNT(*)::int FROM vehicle_queue WHERE destination_id = $1`, destinationID).Scan(&n); err != nil {
+			return err
+		}
+		if n == 1 {
+			if _, err := tx.Exec(ctx, `UPDATE vehicle_queue SET queue_position = 1 WHERE id = $1`, queueEntryID); err != nil {
+				return err
+			}
+		}
+	}
+
+	return tx.Commit(ctx)
 }
 
 func (r *RepositoryImpl) AddQueueEntry(ctx context.Context, req AddQueueEntryRequest) (*QueueEntry, *DayPassCreatedEvent, *DayPassCreatedEvent, string, error) {
@@ -541,6 +632,10 @@ func (r *RepositoryImpl) AddQueueEntry(ctx context.Context, req AddQueueEntryReq
 		return nil, nil, nil, "", err
 	}
 	defer tx.Rollback(ctx)
+
+	if err := r.queueDestAdvisoryLock(ctx, tx, req.DestinationID); err != nil {
+		return nil, nil, nil, "", err
+	}
 
 	// Check if vehicle is already in any queue
 	var existingEntryID, existingDestinationID, existingDestinationName string
@@ -752,13 +847,15 @@ func (r *RepositoryImpl) UpdateQueueEntry(ctx context.Context, id string, req Up
         SELECT q.id, q.vehicle_id, COALESCE(NULLIF(v.license_plate, ''), NULLIF(q.license_plate, ''), '[UNKNOWN]'), q.destination_id, q.destination_name,
                q.sub_route, q.sub_route_name, q.queue_type, q.queue_position, q.status,
                q.entered_at, q.available_seats, q.total_seats, q.base_price,
-               q.estimated_departure, q.actual_departure
+               q.estimated_departure, q.actual_departure,
+               COALESCE(q.is_garage_blocked, false)
         FROM vehicle_queue q LEFT JOIN vehicles v ON v.id=q.vehicle_id
         WHERE q.id=$1`, id)
 	var e QueueEntry
 	if err := row.Scan(&e.ID, &e.VehicleID, &e.LicensePlate, &e.DestinationID, &e.DestinationName,
 		&e.SubRoute, &e.SubRouteName, &e.QueueType, &e.QueuePosition, &e.Status,
-		&e.EnteredAt, &e.AvailableSeats, &e.TotalSeats, &e.BasePrice, &e.EstimatedDeparture, &e.ActualDeparture); err != nil {
+		&e.EnteredAt, &e.AvailableSeats, &e.TotalSeats, &e.BasePrice, &e.EstimatedDeparture, &e.ActualDeparture,
+		&e.IsGarageBlocked); err != nil {
 		return nil, err
 	}
 	return &e, nil
@@ -771,10 +868,20 @@ func (r *RepositoryImpl) DeleteQueueEntry(ctx context.Context, id string) error 
 	}
 	defer tx.Rollback(ctx)
 
+	var destID string
+	if err := tx.QueryRow(ctx, `SELECT destination_id FROM vehicle_queue WHERE id=$1`, id).Scan(&destID); err != nil {
+		if err == pgx.ErrNoRows {
+			return fmt.Errorf("queue entry not found")
+		}
+		return err
+	}
+	if err := r.queueDestAdvisoryLock(ctx, tx, destID); err != nil {
+		return err
+	}
+
 	var (
 		vehicleID string
 		lp        string
-		destID    string
 		destName  string
 		totalSeats, availableSeats int
 		basePrice float64
@@ -848,6 +955,9 @@ func (r *RepositoryImpl) DeleteQueueEntry(ctx context.Context, id string) error 
 	if ct.RowsAffected() == 0 {
 		return fmt.Errorf("queue entry not found")
 	}
+	if err := r.compactQueuePositionsTx(ctx, tx, destID); err != nil {
+		return err
+	}
 	return tx.Commit(ctx)
 }
 
@@ -910,6 +1020,10 @@ func (r *RepositoryImpl) ReorderQueue(ctx context.Context, destinationID string,
 	}
 	defer tx.Rollback(ctx)
 
+	if err := r.queueDestAdvisoryLock(ctx, tx, destinationID); err != nil {
+		return err
+	}
+
 	// lock rows for destination
 	if _, err := tx.Exec(ctx, `SELECT id FROM vehicle_queue WHERE destination_id=$1 FOR UPDATE`, destinationID); err != nil {
 		return err
@@ -928,6 +1042,10 @@ func (r *RepositoryImpl) MoveEntry(ctx context.Context, entryID string, destinat
 		return err
 	}
 	defer tx.Rollback(ctx)
+
+	if err := r.queueDestAdvisoryLock(ctx, tx, destinationID); err != nil {
+		return err
+	}
 
 	// lock destination
 	if _, err := tx.Exec(ctx, `SELECT id FROM vehicle_queue WHERE destination_id=$1 FOR UPDATE`, destinationID); err != nil {
@@ -970,12 +1088,35 @@ func (r *RepositoryImpl) TransferSeats(ctx context.Context, fromEntryID, toEntry
 	}
 	defer tx.Rollback(ctx)
 
-	var fromAvail, fromTotal, toAvail, toTotal int
-	if err := tx.QueryRow(ctx, `SELECT available_seats, total_seats FROM vehicle_queue WHERE id=$1 FOR UPDATE`, fromEntryID).Scan(&fromAvail, &fromTotal); err != nil {
+	var fromDest, toDest string
+	if err := tx.QueryRow(ctx, `SELECT destination_id FROM vehicle_queue WHERE id=$1`, fromEntryID).Scan(&fromDest); err != nil {
 		return err
 	}
-	if err := tx.QueryRow(ctx, `SELECT available_seats, total_seats FROM vehicle_queue WHERE id=$1 FOR UPDATE`, toEntryID).Scan(&toAvail, &toTotal); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT destination_id FROM vehicle_queue WHERE id=$1`, toEntryID).Scan(&toDest); err != nil {
 		return err
+	}
+	if err := r.queueDestAdvisoryLockTwo(ctx, tx, fromDest, toDest); err != nil {
+		return err
+	}
+
+	firstID, secondID := fromEntryID, toEntryID
+	if secondID < firstID {
+		firstID, secondID = secondID, firstID
+	}
+	type snap struct {
+		avail, total int
+	}
+	var s1, s2 snap
+	if err := tx.QueryRow(ctx, `SELECT available_seats, total_seats FROM vehicle_queue WHERE id=$1 FOR UPDATE`, firstID).Scan(&s1.avail, &s1.total); err != nil {
+		return err
+	}
+	if err := tx.QueryRow(ctx, `SELECT available_seats, total_seats FROM vehicle_queue WHERE id=$1 FOR UPDATE`, secondID).Scan(&s2.avail, &s2.total); err != nil {
+		return err
+	}
+	fromAvail, fromTotal := s1.avail, s1.total
+	toAvail, toTotal := s2.avail, s2.total
+	if firstID != fromEntryID {
+		fromAvail, fromTotal, toAvail, toTotal = s2.avail, s2.total, s1.avail, s1.total
 	}
 
 	// Calculate booked seats
@@ -1011,8 +1152,15 @@ func (r *RepositoryImpl) ChangeDestination(ctx context.Context, entryID, newDest
 	}
 	defer tx.Rollback(ctx)
 
-	// get current destination
 	var oldDest string
+	if err := tx.QueryRow(ctx, `SELECT destination_id FROM vehicle_queue WHERE id=$1`, entryID).Scan(&oldDest); err != nil {
+		return err
+	}
+	if err := r.queueDestAdvisoryLockTwo(ctx, tx, oldDest, newDestID); err != nil {
+		return err
+	}
+
+	// re-lock the moving row after destination advisories (consistent order with other writers)
 	if err := tx.QueryRow(ctx, `SELECT destination_id FROM vehicle_queue WHERE id=$1 FOR UPDATE`, entryID).Scan(&oldDest); err != nil {
 		return err
 	}
@@ -1141,6 +1289,7 @@ func (r *RepositoryImpl) ListQueueSummaries(ctx context.Context, station string)
 			       COALESCE(r.base_price, 0) as base_price
 			FROM vehicle_queue q
 			LEFT JOIN routes r ON r.station_id = q.destination_id
+			WHERE NOT COALESCE(q.is_garage_blocked, false)
 			GROUP BY q.destination_id, r.station_name, q.destination_name, r.base_price
 			ORDER BY COALESCE(r.station_name, q.destination_name) ASC`
 	} else {
@@ -1167,7 +1316,8 @@ func (r *RepositoryImpl) ListQueueSummaries(ctx context.Context, station string)
 			       COALESCE(r.base_price, 0) as base_price
 			FROM vehicle_queue q
 			LEFT JOIN routes r ON r.station_id = q.destination_id
-			WHERE q.destination_name IN (%s)
+			WHERE NOT COALESCE(q.is_garage_blocked, false)
+			  AND q.destination_name IN (%s)
 			GROUP BY q.destination_id, r.station_name, q.destination_name, r.base_price
 			ORDER BY COALESCE(r.station_name, q.destination_name) ASC`, strings.Join(placeholders, ","))
 	}
@@ -1220,6 +1370,7 @@ func (r *RepositoryImpl) ListRouteSummaries(ctx context.Context) ([]RouteSummary
                    COALESCE(SUM(total_seats),0) AS total_seats,
                    COALESCE(SUM(available_seats),0) AS available_seats
             FROM vehicle_queue
+            WHERE NOT COALESCE(is_garage_blocked, false)
             GROUP BY destination_id, destination_name
         )
         SELECT rt.id AS route_id,

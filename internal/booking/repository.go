@@ -44,6 +44,10 @@ type RepositoryImpl struct {
 
 const verificationAttempts = 32
 
+// bookingDestinationTxAdvLockK1 is the first key for pg_advisory_xact_lock(int, int) so concurrent
+// seat bookings for the same destination serialize without deadlocking on vehicle_queue updates.
+const bookingDestinationTxAdvLockK1 = 918237401
+
 // ErrCancelLastNoBooking means there is no eligible ACTIVE queued booking for the operator.
 var ErrCancelLastNoBooking = errors.New("no active queued booking found for this operator")
 
@@ -327,7 +331,9 @@ func NewRepository(db *pgxpool.Pool) Repository { return &RepositoryImpl{db: db}
 
 // CreateBookingByDestination allocates seats on a single vehicle.
 // When PreferExactFit=true, it first searches an exact-seat match, then falls back to first-eligible.
-// When PreferExactFit=false, it directly uses first-eligible by queue order.
+// When PreferExactFit=false, it directly picks the first-eligible candidate.
+// Eligible ordering: garage-unblocked rows with seats, then stable tie-break —
+// serving row / resume-after-unblocked / queue_position — then positions are compacted (blocked slots keep indices).
 func (r *RepositoryImpl) CreateBookingByDestination(ctx context.Context, req CreateBookingByDestinationRequest) (*Booking, error) {
 	if req.Seats <= 0 {
 		return nil, fmt.Errorf("seats must be > 0")
@@ -338,6 +344,10 @@ func (r *RepositoryImpl) CreateBookingByDestination(ctx context.Context, req Cre
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1, hashtext($2::text)::int)`, bookingDestinationTxAdvLockK1, req.DestinationID); err != nil {
+		return nil, err
+	}
 
 	// Idempotency: if a booking was already created for this key, return it.
 	if strings.TrimSpace(req.IdempotencyKey) != "" {
@@ -361,13 +371,18 @@ func (r *RepositoryImpl) CreateBookingByDestination(ctx context.Context, req Cre
 		if req.SubRoute != nil && *req.SubRoute != "" {
 			row = tx.QueryRow(ctx, `
                 WITH candidate AS (
-                    SELECT id, destination_id
-                    FROM vehicle_queue
-                    WHERE destination_id=$1 AND queue_type='REGULAR' AND status IN ('WAITING','LOADING','READY')
-                      AND sub_route=$3 AND available_seats = $2
-                    ORDER BY queue_position ASC
+                    SELECT q.id, q.destination_id
+                    FROM vehicle_queue q
+                    LEFT JOIN queue_destination_booking_state _qbs ON _qbs.destination_id = q.destination_id
+                    WHERE q.destination_id=$1 AND q.queue_type='REGULAR' AND q.status IN ('WAITING','LOADING','READY')
+                      AND NOT COALESCE(q.is_garage_blocked, false)
+                      AND q.sub_route=$3 AND q.available_seats = $2
+                    ORDER BY
+                      CASE WHEN q.id IS NOT DISTINCT FROM _qbs.serving_queue_entry_id THEN 0 ELSE 1 END,
+                      CASE WHEN q.prioritize_after_blocked_unblock THEN 0 ELSE 1 END,
+                      q.queue_position ASC
                     LIMIT 1
-                    FOR UPDATE
+                    FOR UPDATE OF q
                 )
                 UPDATE vehicle_queue q
                 SET available_seats = q.available_seats - $2
@@ -378,13 +393,18 @@ func (r *RepositoryImpl) CreateBookingByDestination(ctx context.Context, req Cre
 		} else {
 			row = tx.QueryRow(ctx, `
                 WITH candidate AS (
-                    SELECT id, destination_id
-                    FROM vehicle_queue
-                    WHERE destination_id=$1 AND queue_type='REGULAR' AND status IN ('WAITING','LOADING','READY')
-                      AND available_seats = $2
-                    ORDER BY queue_position ASC
+                    SELECT q.id, q.destination_id
+                    FROM vehicle_queue q
+                    LEFT JOIN queue_destination_booking_state _qbs ON _qbs.destination_id = q.destination_id
+                    WHERE q.destination_id=$1 AND q.queue_type='REGULAR' AND q.status IN ('WAITING','LOADING','READY')
+                      AND NOT COALESCE(q.is_garage_blocked, false)
+                      AND q.available_seats = $2
+                    ORDER BY
+                      CASE WHEN q.id IS NOT DISTINCT FROM _qbs.serving_queue_entry_id THEN 0 ELSE 1 END,
+                      CASE WHEN q.prioritize_after_blocked_unblock THEN 0 ELSE 1 END,
+                      q.queue_position ASC
                     LIMIT 1
-                    FOR UPDATE
+                    FOR UPDATE OF q
                 )
                 UPDATE vehicle_queue q
                 SET available_seats = q.available_seats - $2
@@ -411,13 +431,18 @@ func (r *RepositoryImpl) CreateBookingByDestination(ctx context.Context, req Cre
 		if req.SubRoute != nil && *req.SubRoute != "" {
 			row = tx.QueryRow(ctx, `
                 WITH candidate AS (
-                    SELECT id, destination_id
-                    FROM vehicle_queue
-                    WHERE destination_id=$1 AND queue_type='REGULAR' AND status IN ('WAITING','LOADING','READY')
-                      AND sub_route=$3 AND available_seats >= $2
-                    ORDER BY queue_position ASC
+                    SELECT q.id, q.destination_id
+                    FROM vehicle_queue q
+                    LEFT JOIN queue_destination_booking_state _qbs ON _qbs.destination_id = q.destination_id
+                    WHERE q.destination_id=$1 AND q.queue_type='REGULAR' AND q.status IN ('WAITING','LOADING','READY')
+                      AND NOT COALESCE(q.is_garage_blocked, false)
+                      AND q.sub_route=$3 AND q.available_seats >= $2
+                    ORDER BY
+                      CASE WHEN q.id IS NOT DISTINCT FROM _qbs.serving_queue_entry_id THEN 0 ELSE 1 END,
+                      CASE WHEN q.prioritize_after_blocked_unblock THEN 0 ELSE 1 END,
+                      q.queue_position ASC
                     LIMIT 1
-                    FOR UPDATE
+                    FOR UPDATE OF q
                 )
                 UPDATE vehicle_queue q
                 SET available_seats = q.available_seats - $2
@@ -428,13 +453,18 @@ func (r *RepositoryImpl) CreateBookingByDestination(ctx context.Context, req Cre
 		} else {
 			row = tx.QueryRow(ctx, `
                 WITH candidate AS (
-                    SELECT id, destination_id
-                    FROM vehicle_queue
-                    WHERE destination_id=$1 AND queue_type='REGULAR' AND status IN ('WAITING','LOADING','READY')
-                      AND available_seats >= $2
-                    ORDER BY queue_position ASC
+                    SELECT q.id, q.destination_id
+                    FROM vehicle_queue q
+                    LEFT JOIN queue_destination_booking_state _qbs ON _qbs.destination_id = q.destination_id
+                    WHERE q.destination_id=$1 AND q.queue_type='REGULAR' AND q.status IN ('WAITING','LOADING','READY')
+                      AND NOT COALESCE(q.is_garage_blocked, false)
+                      AND q.available_seats >= $2
+                    ORDER BY
+                      CASE WHEN q.id IS NOT DISTINCT FROM _qbs.serving_queue_entry_id THEN 0 ELSE 1 END,
+                      CASE WHEN q.prioritize_after_blocked_unblock THEN 0 ELSE 1 END,
+                      q.queue_position ASC
                     LIMIT 1
-                    FOR UPDATE
+                    FOR UPDATE OF q
                 )
                 UPDATE vehicle_queue q
                 SET available_seats = q.available_seats - $2
@@ -546,6 +576,10 @@ func (r *RepositoryImpl) CreateBookingByDestination(ctx context.Context, req Cre
             )`, queueID, destID, destName, licensePlate, totalSeats, seatsForTrip, req.StaffID); err != nil {
 			return nil, err
 		}
+	}
+
+	if err := r.applyBookingQueueServingAndCompactTx(ctx, tx, destID, queueID, availableSeats); err != nil {
+		return nil, err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -785,7 +819,7 @@ func (r *RepositoryImpl) cancelLastBookingAfterQueueRemoved(ctx context.Context,
 		}
 	}
 
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('vehicle_queue:' || $1::text))`, destID); err != nil {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1, hashtext($2::text)::int)`, bookingDestinationTxAdvLockK1, destID); err != nil {
 		return nil, err
 	}
 
@@ -894,7 +928,8 @@ func (r *RepositoryImpl) ListQueueSnapshot(ctx context.Context, destinationID st
         SELECT q.id, q.vehicle_id, COALESCE(NULLIF(v.license_plate, ''), NULLIF(q.license_plate, ''), '[UNKNOWN]'), q.destination_id, q.destination_name,
                q.sub_route, q.sub_route_name, q.queue_type, q.queue_position, q.status,
                q.entered_at, q.available_seats, q.total_seats, q.base_price,
-               q.estimated_departure, q.actual_departure
+               q.estimated_departure, q.actual_departure,
+               COALESCE(q.is_garage_blocked, false)
         FROM vehicle_queue q
         LEFT JOIN vehicles v ON v.id = q.vehicle_id
         WHERE q.destination_id = $1
@@ -909,7 +944,8 @@ func (r *RepositoryImpl) ListQueueSnapshot(ctx context.Context, destinationID st
 		var e QueueEntry
 		if err := rows.Scan(&e.ID, &e.VehicleID, &e.LicensePlate, &e.DestinationID, &e.DestinationName,
 			&e.SubRoute, &e.SubRouteName, &e.QueueType, &e.QueuePosition, &e.Status,
-			&e.EnteredAt, &e.AvailableSeats, &e.TotalSeats, &e.BasePrice, &e.EstimatedDeparture, &e.ActualDeparture); err != nil {
+			&e.EnteredAt, &e.AvailableSeats, &e.TotalSeats, &e.BasePrice, &e.EstimatedDeparture, &e.ActualDeparture,
+			&e.IsGarageBlocked); err != nil {
 			return nil, err
 		}
 		list = append(list, e)
@@ -1074,6 +1110,17 @@ func (r *RepositoryImpl) CreateBookingByQueueEntry(ctx context.Context, req Crea
 	}
 	defer tx.Rollback(ctx)
 
+	var destForAdvLock string
+	if err := tx.QueryRow(ctx, `SELECT destination_id FROM vehicle_queue WHERE id = $1`, req.QueueEntryID).Scan(&destForAdvLock); err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, fmt.Errorf("queue entry not found")
+		}
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1, hashtext($2::text)::int)`, bookingDestinationTxAdvLockK1, destForAdvLock); err != nil {
+		return nil, err
+	}
+
 	// Idempotency: if a booking batch was already created for this key, return it.
 	if strings.TrimSpace(req.IdempotencyKey) != "" {
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, req.IdempotencyKey); err != nil {
@@ -1106,10 +1153,11 @@ func (r *RepositoryImpl) CreateBookingByQueueEntry(ctx context.Context, req Crea
 		FROM vehicle_queue q
 		LEFT JOIN routes r ON r.station_id = q.destination_id
 		WHERE q.id = $1 AND q.queue_type='REGULAR' AND q.status IN ('WAITING','LOADING','READY')
+		  AND NOT COALESCE(q.is_garage_blocked, false)
 		FOR UPDATE OF q`, req.QueueEntryID, pricing.ServiceFeePerSeatTND).Scan(&queueID, &vehicleID, &pricePerSeat, &serviceFeePerSeat, &availableSeats)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("queue entry not found or not available for booking")
+			return nil, fmt.Errorf("queue entry not found, not available for booking, or blocked in garage")
 		}
 		return nil, err
 	}
@@ -1167,13 +1215,6 @@ func (r *RepositoryImpl) CreateBookingByQueueEntry(ctx context.Context, req Crea
 		return nil, err
 	}
 	firstTripOfDay := tripsToday == 0
-
-	fmt.Printf("DEBUG: Checking if vehicle becomes fully booked - newAvailableSeats: %d\n", newAvailableSeats)
-	if newAvailableSeats == 0 {
-		fmt.Printf("DEBUG: Vehicle fully booked after this booking; trip/exitPass created after seats\n")
-	} else {
-		fmt.Printf("DEBUG: Vehicle not fully booked yet - available seats: %d\n", newAvailableSeats)
-	}
 
 	// Seat numbering per car is derived from occupancy (booked vs free seats),
 	// not from booking row count, so it stays consistent per vehicle lifecycle.
@@ -1240,11 +1281,9 @@ func (r *RepositoryImpl) CreateBookingByQueueEntry(ctx context.Context, req Crea
 
 	// Trip + exit pass after booking rows so firstTripOfDay replay stays consistent with created_at.
 	if newAvailableSeats == 0 {
-		fmt.Printf("DEBUG: Vehicle is now fully booked! Creating trip record...\n")
 		tripID := fmt.Sprintf("trip_%d", time.Now().UnixNano())
 		currentExitTime := time.Now().In(time.FixedZone("Africa/Tunis", 3600)) // Use Tunisia timezone
 
-		fmt.Printf("DEBUG: Inserting trip record with ID: %s, Vehicle: %s, Destination: %s\n", tripID, licensePlate, destName)
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO trips (
 				id, queue_id, destination_id, destination_name, license_plate,
@@ -1252,10 +1291,8 @@ func (r *RepositoryImpl) CreateBookingByQueueEntry(ctx context.Context, req Crea
 			) VALUES (
 				$1, $2, $3, $4, $5, NOW(), NOW(), $6, $7, $8
 			)`, tripID, queueID, destID, destName, licensePlate, totalSeats, totalSeats, req.StaffID); err != nil {
-			fmt.Printf("DEBUG: Error creating trip record: %v\n", err)
 			return nil, err
 		}
-		fmt.Printf("DEBUG: Trip record created successfully!\n")
 
 		totalPrice := basePrice * float64(totalSeats)
 		exitPass = &ExitPass{
@@ -1273,7 +1310,10 @@ func (r *RepositoryImpl) CreateBookingByQueueEntry(ctx context.Context, req Crea
 			VehicleCapacity: totalSeats,
 			BasePrice:       basePrice,
 		}
-		fmt.Printf("DEBUG: Exit pass created for frontend\n")
+	}
+
+	if err := r.applyBookingQueueServingAndCompactTx(ctx, tx, destID, queueID, newAvailableSeats); err != nil {
+		return nil, err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -1419,6 +1459,10 @@ func (r *RepositoryImpl) CreateGhostBooking(ctx context.Context, req CreateGhost
 		return nil, err
 	}
 
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1, hashtext($2::text)::int)`, bookingDestinationTxAdvLockK1, resolvedDestinationID); err != nil {
+		return nil, err
+	}
+
 	var staffName string
 	if req.StaffID != "" {
 		err = tx.QueryRow(ctx, `SELECT CONCAT(first_name, ' ', last_name) FROM staff WHERE id = $1`, req.StaffID).Scan(&staffName)
@@ -1427,10 +1471,6 @@ func (r *RepositoryImpl) CreateGhostBooking(ctx context.Context, req CreateGhost
 		}
 	} else {
 		staffName = "System"
-	}
-
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, resolvedDestinationID); err != nil {
-		return nil, err
 	}
 
 	var nextGhostNumber int
