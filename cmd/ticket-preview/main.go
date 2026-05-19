@@ -137,6 +137,10 @@ func humanThermalPreview(content string, w int) string {
 			raw := strings.TrimSuffix(strings.TrimPrefix(line, "{{FR_CENTER_TITLE:"), "}}")
 			b.WriteString(centerRunes(raw, w))
 			b.WriteByte('\n')
+		case strings.HasPrefix(line, "{{FR_TITLE_BIG:") && strings.HasSuffix(line, "}}"):
+			raw := strings.TrimSuffix(strings.TrimPrefix(line, "{{FR_TITLE_BIG:"), "}}")
+			b.WriteString(centerRunes(raw, w))
+			b.WriteByte('\n')
 		case strings.HasPrefix(line, "{{TALON_LP_BIG:") && strings.HasSuffix(line, "}}"):
 			raw := strings.TrimSuffix(strings.TrimPrefix(line, "{{TALON_LP_BIG:"), "}}")
 			b.WriteString(centerRunes(strings.TrimSpace(raw), w))

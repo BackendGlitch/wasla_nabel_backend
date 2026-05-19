@@ -7,11 +7,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"image/png"
-	"strconv"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -846,6 +846,21 @@ func (s *Service) convertToESCPOS(content string, config *PrinterConfig) []byte 
 			setAlign(0x01)
 			setTextStyle(0x08)
 			setTextScale(0x00)
+			buffer.WriteString(raw)
+			buffer.WriteByte(0x0A)
+			resetStyle()
+			if isCompactTalon {
+				buffer.Write([]byte{0x1B, 0x4D, 0x01})
+				buffer.Write([]byte{0x1B, 0x33, compactTalonLineSpacingDots})
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "{{FR_TITLE_BIG:") && strings.HasSuffix(line, "}}") {
+			raw := strings.TrimSuffix(strings.TrimPrefix(line, "{{FR_TITLE_BIG:"), "}}")
+			resetStyle()
+			setAlign(0x01)
+			setTextStyle(0x08)
+			setTextScale(0x11)
 			buffer.WriteString(raw)
 			buffer.WriteByte(0x0A)
 			resetStyle()

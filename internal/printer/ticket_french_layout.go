@@ -79,8 +79,8 @@ func RenderFrenchBookingTicket(data *TicketData) string {
 		sb.WriteString("{{CENTER_SMALL:" + st + "}}\n")
 	}
 
-	// 1) Destination — primary (same style as other FR_CENTER_TITLE headers)
-	sb.WriteString("{{FR_CENTER_TITLE:" + dest + "}}\n")
+	// 1) Destination — primary (double-width for emphasis)
+	sb.WriteString("{{FR_TITLE_BIG:" + dest + "}}\n")
 	sb.WriteString("{{FR_SEP}}\n")
 
 	// 2) License plate — large
